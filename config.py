@@ -18,8 +18,10 @@ class Settings:
 def load_settings() -> Settings:
     load_dotenv()
     token = os.getenv("BOT_TOKEN", "").strip()
-    if not token:
+    if not token or token == "PASTE_BOTFATHER_TOKEN_HERE":
         raise RuntimeError("BOT_TOKEN не задан. Скопируйте .env.example в .env и укажите токен.")
+    if ":" not in token or not token.split(":", 1)[0].isdigit():
+        raise RuntimeError("BOT_TOKEN имеет неверный формат. Нужен API Token от @BotFather, а не Telegram ID.")
     timezone = os.getenv("BOT_TIMEZONE", "Europe/Chisinau").strip()
     try:
         ZoneInfo(timezone)
@@ -31,4 +33,3 @@ def load_settings() -> Settings:
         timezone=timezone,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
     )
-
