@@ -1,6 +1,13 @@
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
+def start_choice_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="👶 Создать новую семью", callback_data="onboarding:create")],
+        [InlineKeyboardButton(text="🔗 Подключиться по коду", callback_data="onboarding:join")],
+    ])
+
+
 def edit_time_keyboard(log_id: int, field: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
@@ -32,11 +39,22 @@ def join_role_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def settings_keyboard(silent_mode: bool) -> InlineKeyboardMarkup:
+def settings_keyboard(silent_mode: bool, is_admin: bool = True) -> InlineKeyboardMarkup:
     label = "🔕 Тихий режим: ВКЛ" if silent_mode else "🔔 Тихий режим: ВЫКЛ"
+    reset_label = "🗑 Полный сброс" if is_admin else "🚪 Покинуть семью"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label, callback_data="settings:toggle-silent")],
         [InlineKeyboardButton(text="📤 Экспорт данных", callback_data="export:menu")],
+        [InlineKeyboardButton(text=reset_label, callback_data="settings:reset")],
+    ])
+
+
+def reset_confirmation_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
+    action = "family" if is_admin else "leave"
+    label = "Да, удалить всё" if is_admin else "Да, выйти"
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text=f"⚠️ {label}", callback_data=f"confirm-reset:{action}")],
+        [InlineKeyboardButton(text="Отмена", callback_data="confirm-reset:cancel")],
     ])
 
 
