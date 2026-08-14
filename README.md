@@ -1,6 +1,6 @@
 # Telegram-бот «Сон ребёнка»
 
-Python 3.11+, aiogram 3, async SQLAlchemy, SQLite и APScheduler.
+Python 3.11+, aiogram 3, async SQLAlchemy, SQLite/PostgreSQL и APScheduler.
 
 ## Запуск
 
@@ -14,7 +14,17 @@ copy .env.example .env  # Linux/macOS: cp .env.example .env
 python bot.py
 ```
 
-Таблицы создаются автоматически. Для production рекомендуется запускать один экземпляр бота: задания APScheduler хранятся в памяти и восстанавливаются из БД при старте. SQLite подходит для одной семьи/небольшой нагрузки; для масштабирования замените `DATABASE_URL` и драйвер на PostgreSQL.
+Таблицы создаются автоматически. Для production рекомендуется запускать один экземпляр бота: задания APScheduler хранятся в памяти и восстанавливаются из БД при старте. Локально можно использовать SQLite, но на Render нужна PostgreSQL, иначе данные исчезнут после перезапуска.
+
+## Постоянная база на Render
+
+1. В Render Dashboard выберите **New → Postgres** и создайте базу в том же регионе, что и бот.
+2. Откройте созданную базу и скопируйте **Internal Database URL**.
+3. В сервисе бота откройте **Environment → Add Environment Variable**.
+4. Создайте переменную `DATABASE_URL` и вставьте URL целиком без кавычек.
+5. Выполните **Manual Deploy → Deploy latest commit**.
+
+URL вида `postgres://...` или `postgresql://...` автоматически преобразуется для async-драйвера. Пароль базы нельзя добавлять в GitHub или `.env.example`.
 
 Команды: `/start`, `/join CODE`, `/status`, `/reset`, `/cancel`.
 

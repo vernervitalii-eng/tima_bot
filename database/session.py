@@ -14,7 +14,7 @@ SessionFactory: async_sessionmaker[AsyncSession] | None = None
 
 async def init_db(url: str) -> None:
     global engine, SessionFactory
-    engine = create_async_engine(url, echo=False)
+    engine = create_async_engine(url, echo=False, pool_pre_ping=True)
     SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -22,6 +22,8 @@ async def init_db(url: str) -> None:
         # миграции сохраняют данные пользователей ранней версии проекта.
         if url.startswith("sqlite"):
             await _migrate_sqlite(connection)
+        elif url.startswith("postgresql"):
+            await _migrate_postgresql(connection)
 
 
 async def _migrate_sqlite(connection) -> None:
@@ -41,6 +43,26 @@ async def _migrate_sqlite(connection) -> None:
     sleep_columns = await columns("sleep_logs")
     if "ended_by_user_id" not in sleep_columns:
         await connection.execute(text("ALTER TABLE sleep_logs ADD COLUMN ended_by_user_id INTEGER REFERENCES users(id)"))
+    await connection.execute(text(
+        "CREATE UNIQUE INDEX IF NOT EXISTS uq_sleep_one_active_per_child "
+        "ON sleep_logs(child_id) WHERE end_time IS NULL"
+    ))
+
+
+async def _migrate_postgresql(connection) -> None:
+    """Минимальные идемпотентные миграции для ранних production-схем."""
+    await connection.execute(text(
+        "ALTER TABLE children ADD COLUMN IF NOT EXISTS silent_mode BOOLEAN NOT NULL DEFAULT FALSE"
+    ))
+    await connection.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(80) NOT NULL DEFAULT 'Член семьи'"
+    ))
+    await connection.execute(text(
+        "ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id)"
+    ))
+    await connection.execute(text(
+        "ALTER TABLE sleep_logs ADD COLUMN IF NOT EXISTS ended_by_user_id INTEGER REFERENCES users(id)"
+    ))
     await connection.execute(text(
         "CREATE UNIQUE INDEX IF NOT EXISTS uq_sleep_one_active_per_child "
         "ON sleep_logs(child_id) WHERE end_time IS NULL"
