@@ -15,6 +15,16 @@ class Settings:
     log_level: str
 
 
+def normalize_database_url(url: str) -> str:
+    """Преобразует обычный URL Render в async URL SQLAlchemy."""
+    value = url.strip()
+    if value.startswith("postgres://"):
+        return "postgresql+asyncpg://" + value[len("postgres://"):]
+    if value.startswith("postgresql://"):
+        return "postgresql+asyncpg://" + value[len("postgresql://"):]
+    return value
+
+
 def load_settings() -> Settings:
     load_dotenv()
     token = os.getenv("BOT_TOKEN", "").strip()
@@ -29,7 +39,9 @@ def load_settings() -> Settings:
         raise RuntimeError(f"Неизвестный BOT_TIMEZONE: {timezone}") from exc
     return Settings(
         token=token,
-        database_url=os.getenv("DATABASE_URL", "sqlite+aiosqlite:///sleep_tracker.db"),
+        database_url=normalize_database_url(
+            os.getenv("DATABASE_URL", "sqlite+aiosqlite:///sleep_tracker.db")
+        ),
         timezone=timezone,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
     )

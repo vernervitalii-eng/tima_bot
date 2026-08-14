@@ -64,6 +64,7 @@ class SleepLog(Base):
             "child_id",
             unique=True,
             sqlite_where=text("end_time IS NULL"),
+            postgresql_where=text("end_time IS NULL"),
         ),
     )
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -20,6 +21,12 @@ async def main() -> None:
         level=getattr(logging, settings.log_level, logging.INFO),
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    backend = "PostgreSQL" if settings.database_url.startswith("postgresql") else "SQLite"
+    logging.getLogger(__name__).info("Используется база данных: %s", backend)
+    if backend == "SQLite" and os.getenv("RENDER"):
+        logging.getLogger(__name__).warning(
+            "SQLite на Render не сохраняется после redeploy/restart. Задайте DATABASE_URL для PostgreSQL."
+        )
     await init_db(settings.database_url)
     bot = Bot(settings.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
@@ -40,4 +47,3 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
-
