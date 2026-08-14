@@ -5,7 +5,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from datetime import timezone
 
-from sqlalchemy import or_, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -181,3 +181,18 @@ async def activities_since(session: AsyncSession, child_id: int, since: datetime
         .where(ActivityLog.child_id == child_id, ActivityLog.timestamp >= since)
         .order_by(ActivityLog.timestamp)
     ))
+
+
+async def leave_family(session: AsyncSession, user: User) -> None:
+    """Удаляет только аккаунт участника, не затрагивая семейные данные."""
+    await session.delete(user)
+    await session.flush()
+
+
+async def delete_family(session: AsyncSession, child_id: int) -> None:
+    """Полностью удаляет профиль ребёнка и все связанные данные."""
+    await session.execute(delete(ActivityLog).where(ActivityLog.child_id == child_id))
+    await session.execute(delete(SleepLog).where(SleepLog.child_id == child_id))
+    await session.execute(delete(User).where(User.child_id == child_id))
+    await session.execute(delete(Child).where(Child.id == child_id))
+    await session.flush()

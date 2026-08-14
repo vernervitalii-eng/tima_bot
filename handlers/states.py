@@ -19,4 +19,5 @@ class SettingsEdit(StatesGroup):
 
 
 class JoinFamily(StatesGroup):
+    code = State()
     display_name = State()

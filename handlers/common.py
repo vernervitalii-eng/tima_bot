@@ -3,13 +3,14 @@ from __future__ import annotations
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
 from config import Settings
 from database import crud
 from database.session import db_session
 from handlers.states import Onboarding
 from keyboards.main import main_keyboard
+from keyboards.inline import start_choice_keyboard
 from services.time_utils import age_parts, parse_birth_date
 
 router = Router(name="common")
@@ -28,11 +29,25 @@ async def start(message: Message, state: FSMContext) -> None:
                 reply_markup=main_keyboard(sleeping),
             )
             return
+    await message.answer(
+        "Что вы хотите сделать?",
+        reply_markup=start_choice_keyboard(),
+    )
+
+
+@router.callback_query(F.data == "onboarding:create")
+async def onboarding_create(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    async with db_session() as session:
+        if await crud.get_user(session, callback.from_user.id):
+            await callback.answer("Профиль уже существует", show_alert=True)
+            return
     await state.set_state(Onboarding.name)
-    await message.answer("Как зовут ребёнка? Напишите имя.")
+    await callback.message.answer("Как зовут ребёнка? Напишите имя.")
+    await callback.answer()
 
 
-@router.message(Onboarding.name, F.text)
+@router.message(Onboarding.name, F.text, ~F.text.startswith("/"))
 async def onboarding_name(message: Message, state: FSMContext) -> None:
     name = message.text.strip()
     if not 1 <= len(name) <= 80:
@@ -43,7 +58,7 @@ async def onboarding_name(message: Message, state: FSMContext) -> None:
     await message.answer("Введите дату рождения в формате ДД.ММ.ГГГГ, например 15.03.2025.")
 
 
-@router.message(Onboarding.birth_date, F.text)
+@router.message(Onboarding.birth_date, F.text, ~F.text.startswith("/"))
 async def onboarding_birth(message: Message, state: FSMContext, settings: Settings) -> None:
     try:
         birth_date = parse_birth_date(message.text)
@@ -72,4 +87,3 @@ async def onboarding_birth(message: Message, state: FSMContext, settings: Settin
 async def cancel(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("Действие отменено.")
-
