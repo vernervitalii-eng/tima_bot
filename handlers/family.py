@@ -2,6 +2,7 @@ from aiogram import Bot, F, Router
 from aiogram.filters import Command, CommandObject
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
+from aiogram.exceptions import TelegramAPIError
 from sqlalchemy import select
 
 from database import crud
@@ -9,12 +10,13 @@ from database.session import db_session
 from database.models import Child
 from keyboards.main import main_keyboard
 from keyboards.inline import (
+    family_keyboard,
     join_role_keyboard,
     reset_confirmation_keyboard,
     settings_keyboard,
     start_choice_keyboard,
 )
-from handlers.states import JoinFamily
+from handlers.states import InviteFamily, JoinFamily
 from services.scheduler import cancel_child_jobs
 from services.time_utils import age_parts, is_quiet_hours
 
@@ -122,7 +124,74 @@ async def family(message: Message) -> None:
             f"Для подключения: <code>/join {user.child.invite_code}</code>"
         )
         silent = user.child.silent_mode and is_quiet_hours(user.child.timezone)
-    await message.answer(text, disable_notification=silent)
+        is_admin = user.role == "admin"
+    await message.answer(text, reply_markup=family_keyboard(is_admin), disable_notification=silent)
+
+
+@router.callback_query(F.data == "family:invite")
+async def invite_begin(callback: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    async with db_session() as session:
+        user = await crud.get_user(session, callback.from_user.id)
+        if not user:
+            await callback.answer("Сначала выполните /start", show_alert=True)
+            return
+        if user.role != "admin":
+            await callback.answer("Приглашать участников может только администратор", show_alert=True)
+            return
+    await state.set_state(InviteFamily.telegram_id)
+    await callback.message.answer(
+        "Введите числовой Telegram ID пользователя.\n\n"
+        "Узнать его можно, например, через бота @userinfobot. Для отмены отправьте /cancel."
+    )
+    await callback.answer()
+
+
+@router.message(InviteFamily.telegram_id, F.text, ~F.text.startswith("/"))
+async def invite_by_telegram_id(message: Message, state: FSMContext, bot: Bot) -> None:
+    raw_id = message.text.strip()
+    if not raw_id.isascii() or not raw_id.isdigit():
+        await message.answer("Нужен числовой Telegram ID без @username. Попробуйте ещё раз.")
+        return
+    telegram_id = int(raw_id)
+    if telegram_id <= 0 or telegram_id > 9_223_372_036_854_775_807:
+        await message.answer("Telegram ID выглядит неверно. Проверьте число и попробуйте ещё раз.")
+        return
+    if telegram_id == message.from_user.id:
+        await message.answer("Это ваш собственный Telegram ID. Введите ID другого пользователя.")
+        return
+
+    async with db_session() as session:
+        admin = await crud.get_user(session, message.from_user.id)
+        if not admin or admin.role != "admin":
+            await state.clear()
+            await message.answer("Приглашение недоступно: профиль администратора не найден.")
+            return
+        child_name = admin.child.name
+        _, status = await crud.invite_family_member(session, admin.child_id, telegram_id)
+
+    await state.clear()
+    if status == "already_member":
+        await message.answer("Этот пользователь уже состоит в вашей семье.")
+        return
+    if status == "other_family":
+        await message.answer(
+            "Этот пользователь уже подключён к другой семье. Ему нужно сначала выполнить /reset в своём боте."
+        )
+        return
+
+    try:
+        await bot.send_message(
+            telegram_id,
+            f"Вас пригласили в семейный профиль «{child_name}». Откройте меню командой /start.",
+        )
+    except TelegramAPIError:
+        await message.answer(
+            "✅ Пользователь добавлен в семью, но сообщение пока не удалось доставить. "
+            "Попросите пользователя открыть этого бота и нажать /start."
+        )
+    else:
+        await message.answer("✅ Пользователь добавлен в семью, приглашение отправлено в Telegram.")
 
 
 @router.message(F.text == "⚙️ Настройки")
