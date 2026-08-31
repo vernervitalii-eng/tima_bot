@@ -85,6 +85,15 @@ def day_period_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def chart_period_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📊 7 дней", callback_data="chart:7"),
+            InlineKeyboardButton(text="📈 14 дней", callback_data="chart:14"),
+        ],
+    ])
+
+
 def day_date_keyboard(today: date, days: int = 14) -> InlineKeyboardMarkup:
     buttons = [
         InlineKeyboardButton(
@@ -95,6 +104,18 @@ def day_date_keyboard(today: date, days: int = 14) -> InlineKeyboardMarkup:
     ]
     rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
     rows.append([InlineKeyboardButton(text="↩️ Назад", callback_data="day:today")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def day_navigation_keyboard(selected: date, today: date) -> InlineKeyboardMarkup:
+    previous = selected - timedelta(days=1)
+    next_day = selected + timedelta(days=1)
+    rows = [[
+        InlineKeyboardButton(text="◀️ Пред. день", callback_data=f"day:nav:{previous:%Y-%m-%d}"),
+        InlineKeyboardButton(text="📅 Выбрать дату", callback_data="day:pick"),
+        InlineKeyboardButton(text="След. день ▶️", callback_data=f"day:nav:{next_day:%Y-%m-%d}")
+        if next_day <= today else InlineKeyboardButton(text="Сегодня", callback_data="day:today"),
+    ]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
