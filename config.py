@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from dotenv import load_dotenv
+
+
+PROJECT_DIR = Path(__file__).resolve().parent
 
 
 @dataclass(frozen=True, slots=True)
@@ -13,15 +17,27 @@ class Settings:
     database_url: str
     timezone: str
     log_level: str
+    gemini_api_key: str | None
+    gemini_model: str
 
 
 def normalize_database_url(url: str) -> str:
-    """Преобразует обычный URL Render в async URL SQLAlchemy."""
+    """Нормализует URL драйвера и фиксирует постоянный путь локальной SQLite."""
     value = url.strip()
     if value.startswith("postgres://"):
         return "postgresql+asyncpg://" + value[len("postgres://"):]
     if value.startswith("postgresql://"):
         return "postgresql+asyncpg://" + value[len("postgresql://"):]
+    for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+        if not value.startswith(prefix):
+            continue
+        location = value[len(prefix):]
+        if location == ":memory:" or location.startswith("file:"):
+            return value
+        database_path = Path(location)
+        if not database_path.is_absolute():
+            database_path = PROJECT_DIR / database_path
+        return prefix + database_path.resolve().as_posix()
     return value
 
 
@@ -44,4 +60,6 @@ def load_settings() -> Settings:
         ),
         timezone=timezone,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
+        gemini_api_key=os.getenv("GEMINI_API_KEY", "").strip() or None,
+        gemini_model=os.getenv("GEMINI_MODEL", "gemini-3.7-flash").strip() or "gemini-3.7-flash",
     )
