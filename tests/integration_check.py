@@ -11,7 +11,9 @@ from services.time_utils import utc_now
 
 
 async def main() -> None:
-    await init_db("sqlite+aiosqlite:///integration_check.db")
+    # In-memory SQLite keeps the smoke-test repeatable and does not leave a
+    # disposable database in the project directory.
+    await init_db("sqlite+aiosqlite:///:memory:")
     async with db_session() as session:
         admin = await crud.create_family(session, 1001, "Тест", date(2025, 1, 1), "Europe/Chisinau")
         code = admin.child.invite_code
@@ -40,6 +42,18 @@ async def main() -> None:
         feeding = await crud.latest_activity(session, member.child_id, "feeding")
         assert feeding and feeding.created_by_user_id == member.id
 
+    # Администратор может заранее добавить участника по Telegram ID.
+    async with db_session() as session:
+        admin = await crud.get_user(session, 1001)
+        invited, status = await crud.invite_family_member(session, admin.child_id, 1004)
+        assert status == "created"
+        assert invited.role == "member"
+    async with db_session() as session:
+        admin = await crud.get_user(session, 1001)
+        invited, status = await crud.invite_family_member(session, admin.child_id, 1004)
+        assert status == "already_member"
+        assert invited.display_name == "Приглашённый участник"
+
     # Участник может выйти, не удаляя семейный профиль.
     async with db_session() as session:
         guest = await crud.join_family(session, 1003, code, "Няня")
@@ -60,6 +74,7 @@ async def main() -> None:
     async with db_session() as session:
         assert await crud.get_user(session, 1001) is None
         assert await crud.get_user(session, 1002) is None
+        assert await crud.get_user(session, 1004) is None
         assert await session.get(Child, child_id) is None
 
     # Проверяем совместимость регистраций роутеров с установленной aiogram 3.x.

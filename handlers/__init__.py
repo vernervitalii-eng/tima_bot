@@ -1,6 +1,6 @@
 from aiogram import Dispatcher
 
-from handlers import activities, common, exports, family, sleep, statistics, status
+from handlers import activities, ai_routine, common, day, exports, family, sleep, statistics, status
 
 
 def register_handlers(dp: Dispatcher) -> None:
@@ -12,4 +12,6 @@ def register_handlers(dp: Dispatcher) -> None:
     dp.include_router(activities.router)
     dp.include_router(status.router)
     dp.include_router(exports.router)
+    dp.include_router(day.router)
+    dp.include_router(ai_routine.router)
     dp.include_router(statistics.router)

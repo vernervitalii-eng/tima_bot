@@ -4,6 +4,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from sqlalchemy import text
+from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from database.models import Base
@@ -17,13 +18,19 @@ async def init_db(url: str) -> None:
     engine = create_async_engine(url, echo=False, pool_pre_ping=True)
     SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-        # create_all не добавляет столбцы в существующую SQLite. Эти идемпотентные
-        # миграции сохраняют данные пользователей ранней версии проекта.
+        # Явный IF NOT EXISTS исключает пересоздание существующих таблиц даже
+        # при одновременном старте двух экземпляров приложения.
+        for table in Base.metadata.sorted_tables:
+            await connection.execute(CreateTable(table, if_not_exists=True))
+        # CREATE TABLE не добавляет столбцы в существующую схему. Эти
+        # идемпотентные миграции сохраняют данные пользователей ранней версии.
         if url.startswith("sqlite"):
             await _migrate_sqlite(connection)
         elif url.startswith("postgresql"):
             await _migrate_postgresql(connection)
+        for table in Base.metadata.sorted_tables:
+            for index in table.indexes:
+                await connection.execute(CreateIndex(index, if_not_exists=True))
 
 
 async def _migrate_sqlite(connection) -> None:

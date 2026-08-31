@@ -54,6 +54,35 @@ async def join_family(session: AsyncSession, telegram_id: int, code: str, displa
     return user
 
 
+async def invite_family_member(
+    session: AsyncSession, child_id: int, telegram_id: int
+) -> tuple[User, str]:
+    """Добавляет участника по Telegram ID и возвращает его вместе со статусом."""
+    existing = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+    if existing:
+        status = "already_member" if existing.child_id == child_id else "other_family"
+        return existing, status
+
+    user = User(
+        telegram_id=telegram_id,
+        child_id=child_id,
+        role=UserRole.MEMBER.value,
+        display_name="Приглашённый участник",
+    )
+    try:
+        async with session.begin_nested():
+            session.add(user)
+            await session.flush()
+        return user, "created"
+    except IntegrityError:
+        # Другой запрос мог одновременно пригласить тот же Telegram ID.
+        existing = await session.scalar(select(User).where(User.telegram_id == telegram_id))
+        if existing is None:
+            raise
+        status = "already_member" if existing.child_id == child_id else "other_family"
+        return existing, status
+
+
 async def active_sleep(session: AsyncSession, child_id: int) -> SleepLog | None:
     return await session.scalar(
         select(SleepLog)
@@ -137,6 +166,21 @@ async def sleeps_overlapping(session: AsyncSession, child_id: int, since: dateti
     return list(rows)
 
 
+async def completed_sleeps_since(
+    session: AsyncSession, child_id: int, since: datetime
+) -> list[SleepLog]:
+    rows = await session.scalars(
+        select(SleepLog)
+        .where(
+            SleepLog.child_id == child_id,
+            SleepLog.end_time.is_not(None),
+            SleepLog.end_time >= since,
+        )
+        .order_by(SleepLog.start_time)
+    )
+    return list(rows)
+
+
 async def family_telegram_ids(session: AsyncSession, child_id: int) -> list[int]:
     return list(await session.scalars(select(User.telegram_id).where(User.child_id == child_id)))
 
@@ -179,6 +223,20 @@ async def activities_since(session: AsyncSession, child_id: int, since: datetime
     return list(await session.scalars(
         select(ActivityLog)
         .where(ActivityLog.child_id == child_id, ActivityLog.timestamp >= since)
+        .order_by(ActivityLog.timestamp)
+    ))
+
+
+async def activities_between(
+    session: AsyncSession, child_id: int, since: datetime, until: datetime
+) -> list[ActivityLog]:
+    return list(await session.scalars(
+        select(ActivityLog)
+        .where(
+            ActivityLog.child_id == child_id,
+            ActivityLog.timestamp >= since,
+            ActivityLog.timestamp < until,
+        )
         .order_by(ActivityLog.timestamp)
     ))
 
