@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 
@@ -39,6 +41,14 @@ def join_role_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def family_keyboard(is_admin: bool) -> InlineKeyboardMarkup | None:
+    if not is_admin:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="➕ Пригласить по Telegram ID", callback_data="family:invite")],
+    ])
+
+
 def settings_keyboard(silent_mode: bool, is_admin: bool = True) -> InlineKeyboardMarkup:
     label = "🔕 Тихий режим: ВКЛ" if silent_mode else "🔔 Тихий режим: ВЫКЛ"
     reset_label = "🗑 Полный сброс" if is_admin else "🚪 Покинуть семью"
@@ -62,4 +72,33 @@ def export_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="CSV для Excel — 7 дней", callback_data="export:csv:7")],
         [InlineKeyboardButton(text="CSV для Excel — 30 дней", callback_data="export:csv:30")],
+    ])
+
+
+def day_period_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
+            InlineKeyboardButton(text="⏪ Вчера", callback_data="day:yesterday"),
+        ],
+        [InlineKeyboardButton(text="🗓 Выбрать дату", callback_data="day:pick")],
+    ])
+
+
+def day_date_keyboard(today: date, days: int = 14) -> InlineKeyboardMarkup:
+    buttons = [
+        InlineKeyboardButton(
+            text=(today - timedelta(days=offset)).strftime("%d.%m"),
+            callback_data=f"day:date:{today - timedelta(days=offset):%Y-%m-%d}",
+        )
+        for offset in range(days)
+    ]
+    rows = [buttons[index:index + 2] for index in range(0, len(buttons), 2)]
+    rows.append([InlineKeyboardButton(text="↩️ Назад", callback_data="day:today")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def ai_refresh_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="🔄 Обновить анализ", callback_data="ai:refresh")],
     ])
