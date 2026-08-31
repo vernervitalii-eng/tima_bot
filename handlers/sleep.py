@@ -13,7 +13,9 @@ from handlers.states import EditTime
 from keyboards.inline import edit_time_keyboard
 from keyboards.main import main_keyboard
 from services.scheduler import notify_family, schedule_after_sleep, schedule_after_wake
-from services.time_utils import format_duration, is_quiet_hours, parse_relative_time, to_local, utc_now
+from services.norms import norm_for_age
+from services.sleep_insights import build_wake_widget, typical_wake_minutes
+from services.time_utils import age_parts, format_duration, is_quiet_hours, parse_relative_time, to_local, utc_now
 
 router = Router(name="sleep")
 
@@ -102,15 +104,24 @@ async def do_wake(message: Message, at=None) -> None:
             await message.answer("Пробуждение уже отметил другой член семьи.", reply_markup=main_keyboard(False))
             return
         duration = at - log.start_time
+        history = await crud.completed_sleeps_since(session, user.child_id, at - timedelta(days=14))
         ids = await crud.family_telegram_ids(session, user.child_id)
         name, timezone, child_id, birth = user.child.name, user.child.timezone, user.child_id, user.child.birth_date
         local = to_local(at, timezone)
+        months, _ = age_parts(birth, local.date())
+        norm = norm_for_age(months)
+        fallback_wake = round((norm.wake_min + norm.wake_max) / 2)
+        typical_wake, history_samples = typical_wake_minutes(history, fallback_wake)
         silent = user.child.silent_mode and is_quiet_hours(user.child.timezone)
-        text = (
-            f"☀️ {name} проснулся(ась) в {local:%H:%M}.\n"
-            f"Длительность сна: {format_duration(duration)}.\n"
-            f"Предыдущее ВБ: {format_duration(wake_before)}.\n\n"
-            f"<i>Запись добавил(а): {user.display_name}</i>"
+        text = build_wake_widget(
+            name,
+            at,
+            duration,
+            typical_wake,
+            timezone,
+            history_samples,
+            user.display_name,
+            wake_before,
         )
     schedule_after_wake(message.bot, child_id, birth, at)
     for telegram_id in ids:
