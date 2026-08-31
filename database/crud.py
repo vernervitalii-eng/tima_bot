@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import secrets
+from collections.abc import Iterable
 from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from datetime import timezone
@@ -239,6 +240,79 @@ async def activities_between(
         )
         .order_by(ActivityLog.timestamp)
     ))
+
+
+async def seed_monthly_data(
+    session: AsyncSession,
+    child_id: int,
+    user_id: int,
+    sleeps: Iterable[object],
+    activities: Iterable[object] = (),
+) -> dict[str, int]:
+    """Идемпотентно добавляет распарсенную историю, не изменяя существующие строки.
+
+    Объекты принимаются по атрибутам ``start``, ``end``, ``sleep_type`` и
+    ``at``, ``kind``, ``details``. Это сознательно отделяет NLP-парсер от ORM.
+    Дубликатом считается тот же ребёнок и та же дата/время события.
+    """
+    result = {"sleep_added": 0, "sleep_skipped": 0, "activity_added": 0, "activity_skipped": 0}
+    for item in sleeps:
+        start = getattr(item, "start")
+        end = getattr(item, "end", None)
+        exists = await session.scalar(
+            select(SleepLog.id).where(
+                SleepLog.child_id == child_id,
+                SleepLog.start_time == start,
+                SleepLog.end_time == end,
+            ).limit(1)
+        )
+        if exists is not None:
+            result["sleep_skipped"] += 1
+            continue
+        if end is None:
+            # Частичный уникальный индекс разрешает только один активный сон.
+            active = await active_sleep(session, child_id)
+            if active is not None:
+                result["sleep_skipped"] += 1
+                continue
+        session.add(SleepLog(
+            child_id=child_id,
+            start_time=start,
+            end_time=end,
+            sleep_type=getattr(item, "sleep_type", SleepType.DAY.value),
+            created_by_user_id=user_id,
+            ended_by_user_id=user_id if end is not None else None,
+        ))
+        result["sleep_added"] += 1
+
+    for item in activities:
+        at = getattr(item, "at", None)
+        if at is None:
+            result["activity_skipped"] += 1
+            continue
+        activity_type = getattr(item, "kind", "notes")
+        details = getattr(item, "details", None) or None
+        exists = await session.scalar(
+            select(ActivityLog.id).where(
+                ActivityLog.child_id == child_id,
+                ActivityLog.activity_type == activity_type,
+                ActivityLog.timestamp == at,
+                ActivityLog.details == details,
+            ).limit(1)
+        )
+        if exists is not None:
+            result["activity_skipped"] += 1
+            continue
+        session.add(ActivityLog(
+            child_id=child_id,
+            activity_type=activity_type,
+            timestamp=at,
+            details=details,
+            created_by_user_id=user_id,
+        ))
+        result["activity_added"] += 1
+    await session.flush()
+    return result
 
 
 async def leave_family(session: AsyncSession, user: User) -> None:

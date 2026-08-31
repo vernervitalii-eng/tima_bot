@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from sqlalchemy import text
 from sqlalchemy.schema import CreateIndex, CreateTable
@@ -11,26 +13,34 @@ from database.models import Base
 
 engine = None
 SessionFactory: async_sessionmaker[AsyncSession] | None = None
+db_lock = asyncio.Lock()
 
 
 async def init_db(url: str) -> None:
     global engine, SessionFactory
-    engine = create_async_engine(url, echo=False, pool_pre_ping=True)
-    SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
-    async with engine.begin() as connection:
-        # Явный IF NOT EXISTS исключает пересоздание существующих таблиц даже
-        # при одновременном старте двух экземпляров приложения.
-        for table in Base.metadata.sorted_tables:
-            await connection.execute(CreateTable(table, if_not_exists=True))
-        # CREATE TABLE не добавляет столбцы в существующую схему. Эти
-        # идемпотентные миграции сохраняют данные пользователей ранней версии.
-        if url.startswith("sqlite"):
-            await _migrate_sqlite(connection)
-        elif url.startswith("postgresql"):
-            await _migrate_postgresql(connection)
-        for table in Base.metadata.sorted_tables:
-            for index in table.indexes:
-                await connection.execute(CreateIndex(index, if_not_exists=True))
+    async with db_lock:
+        if engine is not None:
+            await engine.dispose()
+        connect_args = {"timeout": 30.0} if url.startswith("sqlite") else {}
+        engine = create_async_engine(url, echo=False, pool_pre_ping=True, connect_args=connect_args)
+        SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
+        async with engine.begin() as connection:
+            if url.startswith("sqlite"):
+                await connection.execute(text("PRAGMA busy_timeout=30000"))
+                await connection.execute(text("PRAGMA foreign_keys=ON"))
+            # Явный IF NOT EXISTS исключает пересоздание существующих таблиц даже
+            # при одновременном старте двух экземпляров приложения.
+            for table in Base.metadata.sorted_tables:
+                await connection.execute(CreateTable(table, if_not_exists=True))
+            # CREATE TABLE не добавляет столбцы в существующую схему. Эти
+            # идемпотентные миграции сохраняют данные пользователей ранней версии.
+            if url.startswith("sqlite"):
+                await _migrate_sqlite(connection)
+            elif url.startswith("postgresql"):
+                await _migrate_postgresql(connection)
+            for table in Base.metadata.sorted_tables:
+                for index in table.indexes:
+                    await connection.execute(CreateIndex(index, if_not_exists=True))
 
 
 async def _migrate_sqlite(connection) -> None:
@@ -80,15 +90,31 @@ async def _migrate_postgresql(connection) -> None:
 async def db_session() -> AsyncIterator[AsyncSession]:
     if SessionFactory is None:
         raise RuntimeError("База данных не инициализирована")
-    async with SessionFactory() as session:
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
+    async with db_lock:
+        async with SessionFactory() as session:
+            try:
+                yield session
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
 
 
 async def close_db() -> None:
-    if engine is not None:
-        await engine.dispose()
+    global engine, SessionFactory
+    async with db_lock:
+        if engine is not None:
+            await engine.dispose()
+        engine = None
+        SessionFactory = None
+
+
+async def read_sqlite_bytes(db_path: str) -> bytes:
+    """Снимает байтовую копию SQLite после завершения текущей транзакции."""
+    if not db_path:
+        raise RuntimeError("Для PostgreSQL файловый backup недоступен")
+    path = Path(db_path)
+    if not path.exists() or not path.is_file():
+        raise FileNotFoundError(f"Файл базы данных не найден: {path}")
+    async with db_lock:
+        return await asyncio.to_thread(path.read_bytes)
