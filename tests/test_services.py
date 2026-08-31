@@ -2,11 +2,11 @@ from datetime import date, datetime
 
 from services.norms import norm_for_age
 from services.time_utils import age_parts, is_quiet_hours, parse_relative_time
-from keyboards.inline import settings_keyboard, start_choice_keyboard
-from config import normalize_database_url
+from keyboards.inline import family_keyboard, settings_keyboard, start_choice_keyboard
+from config import PROJECT_DIR, normalize_database_url
 from database.models import SleepLog
-from sqlalchemy.schema import CreateIndex
-from sqlalchemy.dialects import postgresql
+from sqlalchemy.schema import CreateIndex, CreateTable
+from sqlalchemy.dialects import postgresql, sqlite
 
 
 def test_norm_boundaries():
@@ -38,13 +38,21 @@ def test_start_and_reset_keyboards():
     assert start_callbacks == ["onboarding:create", "onboarding:join"]
     admin_callbacks = [button.callback_data for row in settings_keyboard(False, True).inline_keyboard for button in row]
     assert "settings:reset" in admin_callbacks
+    family_callbacks = [
+        button.callback_data for row in family_keyboard(True).inline_keyboard for button in row
+    ]
+    assert family_callbacks == ["family:invite"]
+    assert family_keyboard(False) is None
 
 
 def test_render_postgres_url_normalization():
     assert normalize_database_url("postgres://user:pass@host/db") == "postgresql+asyncpg://user:pass@host/db"
     assert normalize_database_url("postgresql://user:pass@host/db") == "postgresql+asyncpg://user:pass@host/db"
     sqlite_url = "sqlite+aiosqlite:///sleep_tracker.db"
-    assert normalize_database_url(sqlite_url) == sqlite_url
+    assert normalize_database_url(sqlite_url) == (
+        "sqlite+aiosqlite:///" + (PROJECT_DIR / "sleep_tracker.db").resolve().as_posix()
+    )
+    assert normalize_database_url("sqlite+aiosqlite:///:memory:") == "sqlite+aiosqlite:///:memory:"
 
 
 def test_postgres_active_sleep_unique_index():
@@ -52,3 +60,8 @@ def test_postgres_active_sleep_unique_index():
     ddl = str(CreateIndex(index).compile(dialect=postgresql.dialect()))
     assert "UNIQUE INDEX" in ddl
     assert "WHERE end_time IS NULL" in ddl
+
+
+def test_table_initialization_uses_if_not_exists():
+    ddl = str(CreateTable(SleepLog.__table__, if_not_exists=True).compile(dialect=sqlite.dialect()))
+    assert "CREATE TABLE IF NOT EXISTS" in ddl
