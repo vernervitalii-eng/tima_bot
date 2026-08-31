@@ -1,0 +1,8 @@
+ЗАГРУЗКА В GITHUB
+
+Перенесите содержимое этой папки в КОРЕНЬ репозитория GitHub.
+Файл bot.py должен находиться рядом с config.py и auth.py.
+Папки data, database, handlers, keyboards и services переносите целиком.
+
+НЕ загружайте из исходной папки .env и sleep_tracker.db.
+После Commit changes в GitHub запустите в Render Manual Deploy -> Deploy latest commit.
