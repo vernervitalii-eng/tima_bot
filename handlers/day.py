@@ -9,7 +9,7 @@ from aiogram.types import CallbackQuery, Message
 
 from database import crud
 from database.session import db_session
-from keyboards.inline import day_date_keyboard, day_period_keyboard
+from keyboards.inline import day_date_keyboard, day_navigation_keyboard, day_period_keyboard
 from services.day_timeline import build_day_timeline, local_date_bounds_utc
 from services.norms import norm_for_age
 from services.time_utils import age_parts, is_quiet_hours, to_local, utc_now
@@ -18,7 +18,7 @@ from services.time_utils import age_parts, is_quiet_hours, to_local, utc_now
 router = Router(name="day")
 
 
-async def _load_day(telegram_id: int, selected_date: date) -> tuple[str, bool] | None:
+async def _load_day(telegram_id: int, selected_date: date) -> tuple[str, bool, date] | None:
     now = utc_now()
     async with db_session() as session:
         user = await crud.get_user(session, telegram_id)
@@ -44,7 +44,7 @@ async def _load_day(telegram_id: int, selected_date: date) -> tuple[str, bool] |
             now,
         )
         silent = user.child.silent_mode and is_quiet_hours(user.child.timezone)
-    return text, silent
+    return text, silent, today
 
 
 @router.message(Command("day"))
@@ -61,21 +61,21 @@ async def day_view(message: Message) -> None:
     if loaded is None:
         await message.answer("Сначала выполните /start.")
         return
-    text, silent = loaded
+    text, silent, _ = loaded
     await message.answer(text, reply_markup=day_period_keyboard(), disable_notification=silent)
 
 
 @router.callback_query(F.data.in_({"day:today", "day:yesterday", "day:pick"}))
 async def day_period(callback: CallbackQuery) -> None:
+    await callback.answer()
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         if not user:
-            await callback.answer("Сначала выполните /start", show_alert=True)
+            await callback.message.answer("Сначала выполните /start.")
             return
         today = to_local(utc_now(), user.child.timezone).date()
     if callback.data == "day:pick":
         await callback.message.answer("🗓 <b>Выберите дату</b>", reply_markup=day_date_keyboard(today))
-        await callback.answer()
         return
     selected = today if callback.data == "day:today" else today - timedelta(days=1)
     await _edit_day(callback, selected)
@@ -83,10 +83,22 @@ async def day_period(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith("day:date:"))
 async def day_selected(callback: CallbackQuery) -> None:
+    await callback.answer()
     try:
         selected = date.fromisoformat(callback.data.split(":", 2)[2])
     except ValueError:
-        await callback.answer("Некорректная дата", show_alert=True)
+        await callback.message.answer("Некорректная дата.")
+        return
+    await _edit_day(callback, selected)
+
+
+@router.callback_query(F.data.startswith("day:nav:"))
+async def day_navigation(callback: CallbackQuery) -> None:
+    await callback.answer()
+    try:
+        selected = date.fromisoformat(callback.data.split(":", 2)[2])
+    except ValueError:
+        await callback.message.answer("Некорректная дата.")
         return
     await _edit_day(callback, selected)
 
@@ -94,12 +106,11 @@ async def day_selected(callback: CallbackQuery) -> None:
 async def _edit_day(callback: CallbackQuery, selected: date) -> None:
     loaded = await _load_day(callback.from_user.id, selected)
     if loaded is None:
-        await callback.answer("Сначала выполните /start", show_alert=True)
+        await callback.message.answer("Сначала выполните /start.")
         return
-    text, _ = loaded
+    text, _, today = loaded
     try:
-        await callback.message.edit_text(text, reply_markup=day_period_keyboard())
+        await callback.message.edit_text(text, reply_markup=day_navigation_keyboard(selected, today))
     except TelegramBadRequest as exc:
         if "message is not modified" not in str(exc).lower():
             raise
-    await callback.answer()

@@ -17,6 +17,7 @@ router = Router(name="exports")
 
 @router.callback_query(F.data == "export:menu")
 async def export_menu(callback: CallbackQuery) -> None:
+    await callback.answer()
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         silent = bool(user and user.child.silent_mode and is_quiet_hours(user.child.timezone))
@@ -24,18 +25,18 @@ async def export_menu(callback: CallbackQuery) -> None:
         "Выберите период. CSV открывается в Excel, Numbers и Google Sheets.",
         reply_markup=export_keyboard(), disable_notification=silent,
     )
-    await callback.answer()
 
 
 @router.callback_query(F.data.regexp(r"^export:csv:(7|30)$"))
 async def export_csv(callback: CallbackQuery) -> None:
+    await callback.answer()
     days = int(callback.data.rsplit(":", 1)[1])
     now = utc_now()
     since = now - timedelta(days=days)
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         if not user:
-            await callback.answer("Сначала выполните /start", show_alert=True)
+            await callback.message.answer("Сначала выполните /start.")
             return
         sleeps = await crud.sleeps_overlapping(session, user.child_id, since, now)
         activities = await crud.activities_since(session, user.child_id, since)
@@ -93,4 +94,3 @@ async def export_csv(callback: CallbackQuery) -> None:
         ),
         disable_notification=silent,
     )
-    await callback.answer()

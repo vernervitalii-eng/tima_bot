@@ -12,7 +12,7 @@ from services.time_utils import is_quiet_hours, to_local, utc_now
 router = Router(name="activities")
 
 
-@router.message(F.text == "🍼 Активность")
+@router.message(F.text.in_({"🍼 Активность", "🍼 Питание / Активность"}))
 async def activity_menu(message: Message) -> None:
     async with db_session() as session:
         user = await crud.get_user(session, message.from_user.id)
@@ -25,23 +25,22 @@ async def activity_menu(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("activity:"))
 async def activity_click(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     _, activity_type, details = callback.data.split(":", 2)
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         if not user:
-            await callback.answer("Сначала выполните /start", show_alert=True)
+            await callback.message.answer("Сначала выполните /start.")
             return
         if activity_type == "notes":
             await state.set_state(NoteActivity.value)
             await callback.message.answer("Напишите короткую заметку о лекарстве или зубах. /cancel — отмена.")
-            await callback.answer()
             return
         now = utc_now()
         await crud.add_activity(session, user.child_id, activity_type, now, details, user.id)
         local_time = to_local(now, user.child.timezone)
         child_id, author = user.child_id, user.display_name
     labels = {"feeding": f"Кормление ({details})", "diaper": "Подгузник"}
-    await callback.answer("Записано")
     await notify_family(
         callback.bot,
         child_id,

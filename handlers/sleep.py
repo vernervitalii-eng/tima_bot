@@ -148,44 +148,45 @@ async def wake_now(message: Message) -> None:
 
 @router.callback_query(F.data.startswith("edit:"))
 async def edit_time_begin(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     _, field, raw_id = callback.data.split(":")
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         log = await session.get(SleepLog, int(raw_id))
         if not user or not log or log.child_id != user.child_id:
-            await callback.answer("Запись недоступна", show_alert=True)
+            await callback.message.answer("Запись недоступна.")
             return
     await state.set_state(EditTime.value)
     await state.update_data(log_id=int(raw_id), field=field)
     await callback.message.answer("Введите фактическое время как ЧЧ:ММ или, например, «20 минут назад». /cancel — отмена.")
-    await callback.answer()
 
 
 @router.callback_query(F.data.startswith("adjust:"))
 async def adjust_time(callback: CallbackQuery, bot: Bot) -> None:
+    await callback.answer()
     _, field, raw_id, raw_delta = callback.data.split(":")
     delta = int(raw_delta)
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         log = await session.get(SleepLog, int(raw_id))
         if not user or not log or log.child_id != user.child_id:
-            await callback.answer("Запись недоступна", show_alert=True)
+            await callback.message.answer("Запись недоступна.")
             return
         old_value = log.start_time if field == "start" else log.end_time
         if old_value is None:
-            await callback.answer("Время ещё не записано", show_alert=True)
+            await callback.message.answer("Время ещё не записано.")
             return
         new_value = old_value + timedelta(minutes=delta)
         if new_value > utc_now() + timedelta(minutes=2):
-            await callback.answer("Нельзя указать время в будущем", show_alert=True)
+            await callback.message.answer("Нельзя указать время в будущем.")
             return
         if field == "start":
             if log.end_time and new_value >= log.end_time:
-                await callback.answer("Начало должно быть раньше окончания", show_alert=True)
+                await callback.message.answer("Начало должно быть раньше окончания.")
                 return
             previous = await crud.previous_completed_sleep(session, user.child_id, new_value)
             if previous and previous.end_time and new_value <= previous.end_time:
-                await callback.answer("Время пересекается с прошлым сном", show_alert=True)
+                await callback.message.answer("Время пересекается с прошлым сном.")
                 return
             log.start_time = new_value
             if log.end_time:
@@ -201,9 +202,8 @@ async def adjust_time(callback: CallbackQuery, bot: Bot) -> None:
     elif field == "end":
         schedule_after_wake(bot, child_id, birth, new_value)
     sign = "+" if delta > 0 else ""
-    await callback.answer(f"Время изменено на {sign}{delta} мин")
     await callback.message.answer(
-        f"✏️ Время изменено: {to_local(new_value, timezone):%H:%M}.\n"
+        f"✏️ Время изменено на {sign}{delta} мин: {to_local(new_value, timezone):%H:%M}.\n"
         f"<i>Изменил(а): {user.display_name}</i>"
     )
 

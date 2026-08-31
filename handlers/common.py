@@ -37,14 +37,14 @@ async def start(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "onboarding:create")
 async def onboarding_create(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     async with db_session() as session:
         if await crud.get_user(session, callback.from_user.id):
-            await callback.answer("Профиль уже существует", show_alert=True)
+            await callback.message.answer("Профиль уже существует.")
             return
     await state.set_state(Onboarding.name)
     await callback.message.answer("Как зовут ребёнка? Напишите имя.")
-    await callback.answer()
 
 
 @router.message(Onboarding.name, F.text, ~F.text.startswith("/"))

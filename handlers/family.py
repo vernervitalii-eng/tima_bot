@@ -57,14 +57,14 @@ async def prepare_join(message: Message, state: FSMContext, telegram_id: int, co
 
 @router.callback_query(F.data == "onboarding:join")
 async def onboarding_join(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     async with db_session() as session:
         if await crud.get_user(session, callback.from_user.id):
-            await callback.answer("Вы уже состоите в семье", show_alert=True)
+            await callback.message.answer("Вы уже состоите в семье.")
             return
     await state.set_state(JoinFamily.code)
     await callback.message.answer("Введите семейный код.")
-    await callback.answer()
 
 
 @router.message(JoinFamily.code, F.text, ~F.text.startswith("/"))
@@ -91,12 +91,11 @@ async def complete_join(message: Message, state: FSMContext, display_name: str, 
 
 @router.callback_query(JoinFamily.display_name, F.data.startswith("join-role:"))
 async def join_role_click(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     name = callback.data.split(":", 1)[1]
     if name == "custom":
         await callback.message.answer("Напишите имя или роль, например «Дедушка».")
-        await callback.answer()
         return
-    await callback.answer()
     await complete_join(callback.message, state, name, callback.from_user.id)
 
 
@@ -130,21 +129,21 @@ async def family(message: Message) -> None:
 
 @router.callback_query(F.data == "family:invite")
 async def invite_begin(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         if not user:
-            await callback.answer("Сначала выполните /start", show_alert=True)
+            await callback.message.answer("Сначала выполните /start.")
             return
         if user.role != "admin":
-            await callback.answer("Приглашать участников может только администратор", show_alert=True)
+            await callback.message.answer("Приглашать участников может только администратор.")
             return
     await state.set_state(InviteFamily.telegram_id)
     await callback.message.answer(
         "Введите числовой Telegram ID пользователя.\n\n"
         "Узнать его можно, например, через бота @userinfobot. Для отмены отправьте /cancel."
     )
-    await callback.answer()
 
 
 @router.message(InviteFamily.telegram_id, F.text, ~F.text.startswith("/"))
@@ -213,18 +212,19 @@ async def settings_view(message: Message) -> None:
 
 @router.callback_query(F.data == "settings:toggle-silent")
 async def toggle_silent(callback: CallbackQuery) -> None:
+    await callback.answer()
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         if not user:
-            await callback.answer("Сначала выполните /start", show_alert=True)
+            await callback.message.answer("Сначала выполните /start.")
             return
         if user.role != "admin":
-            await callback.answer("Изменять общие настройки может администратор", show_alert=True)
+            await callback.message.answer("Изменять общие настройки может администратор.")
             return
         user.child.silent_mode = not user.child.silent_mode
         enabled = user.child.silent_mode
     await callback.message.edit_reply_markup(reply_markup=settings_keyboard(enabled, True))
-    await callback.answer("Тихий режим включён" if enabled else "Тихий режим выключен")
+    await callback.message.answer("Тихий режим включён." if enabled else "Тихий режим выключен.")
 
 
 async def show_reset_confirmation(message: Message, telegram_id: int) -> None:
@@ -252,41 +252,42 @@ async def reset_command(message: Message, state: FSMContext) -> None:
 
 @router.callback_query(F.data == "settings:reset")
 async def reset_begin(callback: CallbackQuery, state: FSMContext) -> None:
+    await callback.answer()
     await state.clear()
     await show_reset_confirmation(callback.message, callback.from_user.id)
-    await callback.answer()
 
 
 @router.callback_query(F.data == "confirm-reset:cancel")
 async def reset_cancel(callback: CallbackQuery) -> None:
-    await callback.message.edit_text("Сброс отменён.")
     await callback.answer()
+    await callback.message.edit_text("Сброс отменён.")
 
 
 @router.callback_query(F.data.startswith("confirm-reset:"))
 async def reset_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot) -> None:
+    await callback.answer()
     action = callback.data.split(":", 1)[1]
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
         if not user:
-            await callback.answer("Профиль уже удалён", show_alert=True)
+            await callback.message.answer("Профиль уже удалён.")
             return
         child_id = user.child_id
         child_name = user.child.name
         if action == "family":
             if user.role != "admin":
-                await callback.answer("Только администратор может удалить семью", show_alert=True)
+                await callback.message.answer("Только администратор может удалить семью.")
                 return
             recipients = await crud.family_telegram_ids(session, child_id)
             await crud.delete_family(session, child_id)
         elif action == "leave":
             if user.role == "admin":
-                await callback.answer("Администратор должен использовать полный сброс", show_alert=True)
+                await callback.message.answer("Администратор должен использовать полный сброс.")
                 return
             recipients = [callback.from_user.id]
             await crud.leave_family(session, user)
         else:
-            await callback.answer("Неизвестное действие", show_alert=True)
+            await callback.message.answer("Неизвестное действие.")
             return
 
     await state.clear()
@@ -310,4 +311,3 @@ async def reset_confirm(callback: CallbackQuery, state: FSMContext, bot: Bot) ->
 
     await callback.message.answer(result_text, reply_markup=ReplyKeyboardRemove())
     await callback.message.answer("Что вы хотите сделать дальше?", reply_markup=start_choice_keyboard())
-    await callback.answer("Готово")

@@ -27,13 +27,14 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
         )
         return
 
-    since = utc_now() - timedelta(days=14)
+    since = utc_now() - timedelta(days=31)
     async with db_session() as session:
         user = await crud.get_user(session, telegram_id)
         if not user:
             await message.answer("Сначала выполните /start.")
             return
         logs = await crud.completed_sleeps_since(session, user.child_id, since)
+        activities = await crud.activities_since(session, user.child_id, since)
         birth_date = user.child.birth_date
         timezone_name = user.child.timezone
         today = to_local(utc_now(), timezone_name).date()
@@ -60,6 +61,7 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
             age_months,
             timezone_name,
             logs,
+            activities,
         )
         card = format_analysis_card(analysis, days)
     except Exception:
@@ -74,6 +76,7 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
 
 @router.message(Command("ai_routine"))
 @router.message(F.text == "🧠 AI-анализ")
+@router.message(F.text == "🧠 AI-Режим (Gemini)")
 async def ai_routine(message: Message, settings: Settings) -> None:
     await _run_analysis(message, message.from_user.id, settings)
 
