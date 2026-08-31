@@ -9,6 +9,7 @@ from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from auth import AllowedIdsMiddleware
 from config import load_settings
 from database.session import close_db, init_db
 from handlers import register_handlers
@@ -24,20 +25,29 @@ async def main() -> None:
     backend = "PostgreSQL" if settings.database_url.startswith("postgresql") else "SQLite"
     logging.getLogger(__name__).info("Используется база данных: %s", backend)
     if backend == "SQLite" and os.getenv("RENDER"):
-        logging.getLogger(__name__).warning(
-            "SQLite на Render не сохраняется после redeploy/restart. Задайте DATABASE_URL для PostgreSQL."
-        )
+        if settings.database_url.startswith("sqlite+aiosqlite:////var/data/"):
+            logging.getLogger(__name__).info(
+                "SQLite хранится на постоянном Render Disk: /var/data"
+            )
+        else:
+            logging.getLogger(__name__).warning(
+                "SQLite на Render не сохраняется после redeploy/restart. "
+                "Подключите Render Disk или задайте DATABASE_URL для PostgreSQL."
+            )
     await init_db(settings.database_url)
     bot = Bot(settings.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
     dp["settings"] = settings
+    allowed_ids_middleware = AllowedIdsMiddleware()
+    dp.message.middleware(allowed_ids_middleware)
+    dp.callback_query.middleware(allowed_ids_middleware)
     register_handlers(dp)
 
     scheduler.start()
     await restore_jobs(bot)
     try:
         # Удаляем webhook, чтобы polling мог стартовать после любого способа деплоя.
-        await bot.delete_webhook(drop_pending_updates=False)
+        await bot.delete_webhook(drop_pending_updates=True)
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         scheduler.shutdown(wait=False)
