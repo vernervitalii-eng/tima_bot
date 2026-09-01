@@ -224,6 +224,41 @@ def test_ai_consultant_prompt_contains_parent_correction(monkeypatch):
     assert not consultation_requires_schedule("Почему он долго засыпает?")
 
 
+def test_ai_consultant_retries_once_after_invalid_json(monkeypatch):
+    prompts = []
+    responses = iter([
+        "это не JSON",
+        (
+            '{"answer":"Проверьте длительность последнего окна бодрствования.",'
+            '"key_facts":["Последний сон завершился в 11:00"],'
+            '"updated_schedule":[],"actions":["Начните ритуал на 15 минут раньше"],'
+            '"caveat":"Оцените результат в течение трёх дней"}'
+        ),
+    ])
+
+    class Response:
+        def __init__(self, text):
+            self.text = text
+
+    async def fake_generate(api_key, model_name, contents, config):
+        prompts.append(contents)
+        return Response(next(responses))
+
+    monkeypatch.setattr("services.ai_analyst._generate_with_fallback", fake_generate)
+    result = asyncio.run(ask_sleep_consultant(
+        "test-key",
+        "test-model",
+        12,
+        "UTC",
+        [sleep(datetime(2025, 3, 20, 10), datetime(2025, 3, 20, 11))],
+        "Почему он долго засыпает?",
+    ))
+
+    assert len(prompts) == 2
+    assert prompts[1] != prompts[0]
+    assert "Проверьте длительность последнего окна бодрствования." in result
+
+
 def test_ai_dialog_router_precedes_standard_text_handlers():
     from aiogram import Dispatcher
     from handlers import register_handlers

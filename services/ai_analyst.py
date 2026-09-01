@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from html import escape
 from statistics import mean
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from database.models import SleepLog
 from services.time_utils import to_local, utc_now
@@ -102,6 +102,45 @@ async def _generate_with_fallback(
                     await asyncio.sleep(1.5 * (attempt + 1))
 
     raise RuntimeError("Gemini временно перегружен после повторных попыток") from last_error
+
+
+async def _generate_validated_response(
+    api_key: str,
+    model_name: str,
+    contents: str,
+    config: dict[str, object],
+    response_model: type[BaseModel],
+) -> BaseModel:
+    """Генерирует JSON и один раз безопасно повторяет обрезанный/неполный ответ."""
+    response = await _generate_with_fallback(
+        api_key,
+        model_name,
+        contents,
+        config,
+    )
+    try:
+        return response_model.model_validate_json(response.text)
+    except ValidationError:
+        # Gemini иногда завершает структурированный ответ по MAX_TOKENS. Такой
+        # ответ нельзя чинить дописыванием скобок: запрашиваем новый полный JSON.
+        retry_config = dict(config)
+        current_limit = int(retry_config.get("max_output_tokens", 1400))
+        retry_config["max_output_tokens"] = min(max(current_limit * 2, 2800), 4096)
+        retry_config["temperature"] = min(float(retry_config.get("temperature", 0.3)), 0.2)
+        retry_contents = (
+            f"{contents}\n\n"
+            "КРИТИЧЕСКОЕ ТРЕБОВАНИЕ: предыдущий структурированный ответ был "
+            "неполным или не прошёл схему. Сгенерируй заново ОДИН полный валидный JSON "
+            "строго по заданной схеме. Не добавляй пояснений вне JSON. Пиши компактно: "
+            "каждое текстовое поле — не более 300 символов, но сохрани все обязательные поля."
+        )
+        response = await _generate_with_fallback(
+            api_key,
+            model_name,
+            retry_contents,
+            retry_config,
+        )
+        return response_model.model_validate_json(response.text)
 
 
 def build_sleep_history(logs: list[SleepLog], timezone_name: str) -> list[dict[str, object]]:
@@ -306,31 +345,18 @@ async def ask_sleep_consultant(
     response_model = ConsultantScheduleAnswer if requires_schedule else ConsultantAnswer
     request_config = {
         "system_instruction": system_instruction,
-        "max_output_tokens": 1800,
+        "max_output_tokens": 2400,
         "temperature": 0.3,
         "response_mime_type": "application/json",
         "response_json_schema": response_model.model_json_schema(),
     }
-    response = await _generate_with_fallback(
+    parsed = await _generate_validated_response(
         api_key,
         model_name,
         prompt,
         request_config,
+        response_model,
     )
-    parsed = response_model.model_validate_json(response.text)
-    if requires_schedule and len(parsed.updated_schedule) < 3:
-        correction_prompt = (
-            f"{prompt}\n\n"
-            "КРИТИЧЕСКОЕ ТРЕБОВАНИЕ: это запрос на изменение режима. Поле updated_schedule "
-            "обязательно должно содержать полный пересчитанный график минимум из трёх точных слотов."
-        )
-        response = await _generate_with_fallback(
-            api_key,
-            model_name,
-            correction_prompt,
-            request_config,
-        )
-        parsed = response_model.model_validate_json(response.text)
     return consultant_answer_to_text(parsed)
 
 
@@ -380,12 +406,19 @@ async def analyze_routine(
         f"Данные наблюдений:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
     request_config = {
-        "max_output_tokens": 1400,
+        "max_output_tokens": 2600,
+        "temperature": 0.2,
         "response_mime_type": "application/json",
         "response_json_schema": RoutineAnalysis.model_json_schema(),
     }
-    response = await _generate_with_fallback(api_key, model_name, prompt, request_config)
-    return RoutineAnalysis.model_validate_json(response.text), observed_days
+    parsed = await _generate_validated_response(
+        api_key,
+        model_name,
+        prompt,
+        request_config,
+        RoutineAnalysis,
+    )
+    return parsed, observed_days
 
 
 def format_analysis_card(analysis: RoutineAnalysis, observed_days: int) -> str:
