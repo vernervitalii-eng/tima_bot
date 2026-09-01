@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import secrets
 from collections.abc import Iterable
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 from datetime import timezone
 
-from sqlalchemy import delete, func, inspect, or_, select, text, update
+from sqlalchemy import and_, delete, func, inspect, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -111,13 +111,24 @@ async def try_start_sleep(session: AsyncSession, child_id: int, user_id: int, at
         return None
 
 
+def _sleep_type_for_interval(
+    start: datetime,
+    end: datetime | None,
+    timezone_name: str,
+) -> str:
+    duration_hours = (end - start).total_seconds() / 3600 if end is not None else 0
+    local_start = start.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(timezone_name))
+    return (
+        SleepType.NIGHT.value
+        if local_start.hour >= 19 or local_start.hour < 6 or duration_hours >= 5
+        else SleepType.DAY.value
+    )
+
+
 async def finish_sleep(session: AsyncSession, log: SleepLog, at: datetime, timezone_name: str = "UTC") -> SleepLog:
     log.end_time = at
     # Ночным считаем сон, начатый вечером/ночью, либо длинный сон, пересекающий ночь.
-    duration_hours = (at - log.start_time).total_seconds() / 3600
-    local_start = log.start_time.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(timezone_name))
-    if local_start.hour >= 19 or local_start.hour < 6 or duration_hours >= 5:
-        log.sleep_type = SleepType.NIGHT.value
+    log.sleep_type = _sleep_type_for_interval(log.start_time, at, timezone_name)
     await session.flush()
     return log
 
@@ -125,13 +136,7 @@ async def finish_sleep(session: AsyncSession, log: SleepLog, at: datetime, timez
 async def try_finish_sleep(
     session: AsyncSession, log: SleepLog, at: datetime, timezone_name: str, ended_by_user_id: int
 ) -> bool:
-    duration_hours = (at - log.start_time).total_seconds() / 3600
-    local_start = log.start_time.replace(tzinfo=timezone.utc).astimezone(ZoneInfo(timezone_name))
-    sleep_type = (
-        SleepType.NIGHT.value
-        if local_start.hour >= 19 or local_start.hour < 6 or duration_hours >= 5
-        else SleepType.DAY.value
-    )
+    sleep_type = _sleep_type_for_interval(log.start_time, at, timezone_name)
     result = await session.execute(
         update(SleepLog)
         .where(SleepLog.id == log.id, SleepLog.end_time.is_(None))
@@ -264,6 +269,9 @@ async def seed_monthly_data(
     for item in sleeps:
         start = getattr(item, "start")
         end = getattr(item, "end", None)
+        if end is not None and (end <= start or end - start >= timedelta(hours=24)):
+            result["sleep_skipped"] += 1
+            continue
         exists = await session.scalar(
             select(SleepLog.id).where(
                 SleepLog.child_id == child_id,
@@ -272,6 +280,9 @@ async def seed_monthly_data(
             ).limit(1)
         )
         if exists is not None:
+            result["sleep_skipped"] += 1
+            continue
+        if await sleep_interval_conflict(session, child_id, start, end) is not None:
             result["sleep_skipped"] += 1
             continue
         if end is None:
@@ -320,6 +331,119 @@ async def sleep_by_id(session: AsyncSession, child_id: int, log_id: int) -> Slee
     return await session.scalar(
         select(SleepLog).where(SleepLog.id == log_id, SleepLog.child_id == child_id)
     )
+
+
+async def sleep_interval_conflict(
+    session: AsyncSession,
+    child_id: int,
+    start: datetime,
+    end: datetime | None,
+    exclude_log_id: int | None = None,
+) -> SleepLog | None:
+    """Ищет пересечение полуоткрытых интервалов ``[start, end)`` одного ребёнка."""
+    conditions = [
+        SleepLog.child_id == child_id,
+        or_(SleepLog.end_time.is_(None), SleepLog.end_time > start),
+    ]
+    if end is not None:
+        conditions.append(SleepLog.start_time < end)
+    if exclude_log_id is not None:
+        conditions.append(SleepLog.id != exclude_log_id)
+    return await session.scalar(
+        select(SleepLog)
+        .where(and_(*conditions))
+        .order_by(SleepLog.start_time)
+        .limit(1)
+    )
+
+
+async def create_sleep_interval(
+    session: AsyncSession,
+    child_id: int,
+    user_id: int,
+    start: datetime,
+    end: datetime,
+    timezone_name: str,
+) -> tuple[SleepLog | None, str]:
+    """Безопасно добавляет пропущенный завершённый сон без дублей и пересечений."""
+    if end <= start or end - start >= timedelta(hours=24):
+        return None, "invalid"
+    duplicate = await session.scalar(
+        select(SleepLog).where(
+            SleepLog.child_id == child_id,
+            SleepLog.start_time == start,
+            SleepLog.end_time == end,
+        )
+    )
+    if duplicate is not None:
+        return duplicate, "duplicate"
+    if await sleep_interval_conflict(session, child_id, start, end) is not None:
+        return None, "overlap"
+
+    log = SleepLog(
+        child_id=child_id,
+        created_by_user_id=user_id,
+        ended_by_user_id=user_id,
+        start_time=start,
+        end_time=end,
+        sleep_type=_sleep_type_for_interval(start, end, timezone_name),
+    )
+    session.add(log)
+    await session.flush()
+    return log, "created"
+
+
+async def update_sleep_interval(
+    session: AsyncSession,
+    child_id: int,
+    log_id: int,
+    start: datetime,
+    end: datetime | None,
+    timezone_name: str,
+    expected_start: datetime | None = None,
+    expected_end: datetime | None = None,
+    check_expected: bool = False,
+    edited_by_user_id: int | None = None,
+) -> tuple[SleepLog | None, str]:
+    """Атомарно проверяет и исправляет выбранный сон, не затрагивая соседние строки."""
+    log = await sleep_by_id(session, child_id, log_id)
+    if log is None:
+        return None, "not_found"
+    if check_expected and (
+        log.start_time != expected_start or log.end_time != expected_end
+    ):
+        return log, "stale"
+    if end is not None and (end <= start or end - start >= timedelta(hours=24)):
+        return log, "invalid"
+
+    duplicate_conditions = [
+        SleepLog.child_id == child_id,
+        SleepLog.id != log_id,
+        SleepLog.start_time == start,
+    ]
+    duplicate_conditions.append(
+        SleepLog.end_time.is_(None) if end is None else SleepLog.end_time == end
+    )
+    duplicate = await session.scalar(select(SleepLog).where(and_(*duplicate_conditions)))
+    if duplicate is not None:
+        return log, "duplicate"
+    if await sleep_interval_conflict(
+        session,
+        child_id,
+        start,
+        end,
+        exclude_log_id=log_id,
+    ) is not None:
+        return log, "overlap"
+
+    end_changed = log.end_time != end
+    log.start_time = start
+    log.end_time = end
+    log.sleep_type = _sleep_type_for_interval(start, end, timezone_name)
+    if end_changed and end is not None and edited_by_user_id is not None:
+        log.ended_by_user_id = edited_by_user_id
+    await session.flush()
+    return log, "updated"
 
 
 async def delete_sleep_log(session: AsyncSession, child_id: int, log_id: int) -> bool:

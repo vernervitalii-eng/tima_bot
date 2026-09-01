@@ -133,3 +133,23 @@ async def broadcast_live_status(bot: Bot, child_id: int) -> None:
                 telegram_id,
                 exc_info=True,
             )
+
+
+async def resync_child_runtime(bot: Bot, child_id: int) -> None:
+    """Перестраивает напоминания и рассылает семье статус после ручной правки."""
+    from services.scheduler import cancel_child_jobs, schedule_after_sleep, schedule_after_wake
+
+    async with db_session() as session:
+        child = await session.get(Child, child_id)
+        if child is None:
+            return
+        active = await crud.active_sleep(session, child_id)
+        last = await crud.last_completed_sleep(session, child_id)
+        birth_date = child.birth_date
+
+    cancel_child_jobs(child_id)
+    if active is not None:
+        schedule_after_sleep(bot, child_id, active.id, active.start_time)
+    elif last is not None and last.end_time is not None:
+        schedule_after_wake(bot, child_id, birth_date, last.end_time)
+    await broadcast_live_status(bot, child_id)

@@ -10,6 +10,16 @@ class EditTime(StatesGroup):
     value = State()
 
 
+class HistorySleepEdit(StatesGroup):
+    value = State()
+    confirm = State()
+
+
+class AddMissedSleep(StatesGroup):
+    interval = State()
+    confirm = State()
+
+
 class SettingsEdit(StatesGroup):
     birth_date = State()
 

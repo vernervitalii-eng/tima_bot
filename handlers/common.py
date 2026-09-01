@@ -88,4 +88,14 @@ async def onboarding_birth(message: Message, state: FSMContext, settings: Settin
 @router.message(Command("cancel"))
 async def cancel(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("Действие отменено.")
+    async with db_session() as session:
+        user = await crud.get_user(session, message.from_user.id)
+        if user is None:
+            await message.answer("Действие отменено. Для начала работы выполните /start.")
+            return
+        view = await build_live_status_view(session, user.child)
+    await message.answer(
+        f"↩️ <b>Действие отменено</b>\n\n{view.text}",
+        reply_markup=main_keyboard(view.is_sleeping),
+        disable_notification=view.silent,
+    )

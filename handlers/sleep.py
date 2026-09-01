@@ -7,16 +7,24 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from database import crud
-from database.models import Child, SleepLog
+from database.models import Child
 from database.session import db_session
 from handlers.states import EditTime
 from keyboards.inline import edit_time_keyboard
 from keyboards.main import main_keyboard
 from services.scheduler import schedule_after_sleep, schedule_after_wake
-from services.live_status import broadcast_live_status
+from services.live_status import broadcast_live_status, resync_child_runtime
 from services.norms import norm_for_age
 from services.sleep_insights import build_wake_widget, typical_wake_minutes
-from services.time_utils import age_parts, format_duration, is_quiet_hours, parse_relative_time, to_local, utc_now
+from services.time_utils import (
+    age_parts,
+    format_duration,
+    is_quiet_hours,
+    parse_anchored_local_time,
+    parse_relative_time,
+    to_local,
+    utc_now,
+)
 
 router = Router(name="sleep")
 
@@ -151,14 +159,22 @@ async def wake_now(message: Message) -> None:
 async def edit_time_begin(callback: CallbackQuery, state: FSMContext) -> None:
     await callback.answer()
     _, field, raw_id = callback.data.split(":")
+    if field not in {"start", "end"}:
+        await callback.message.answer("Кнопка устарела. Откройте запись заново.")
+        return
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
-        log = await session.get(SleepLog, int(raw_id))
+        log = await crud.sleep_by_id(session, user.child_id, int(raw_id)) if user else None
         if not user or not log or log.child_id != user.child_id:
             await callback.message.answer("Запись недоступна.")
             return
     await state.set_state(EditTime.value)
-    await state.update_data(log_id=int(raw_id), field=field)
+    await state.update_data(
+        log_id=int(raw_id),
+        field=field,
+        expected_start=log.start_time,
+        expected_end=log.end_time,
+    )
     await callback.message.answer("Введите фактическое время как ЧЧ:ММ или, например, «20 минут назад». /cancel — отмена.")
 
 
@@ -166,10 +182,13 @@ async def edit_time_begin(callback: CallbackQuery, state: FSMContext) -> None:
 async def adjust_time(callback: CallbackQuery, bot: Bot) -> None:
     await callback.answer()
     _, field, raw_id, raw_delta = callback.data.split(":")
+    if field not in {"start", "end"}:
+        await callback.message.answer("Кнопка устарела. Откройте запись заново.")
+        return
     delta = int(raw_delta)
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
-        log = await session.get(SleepLog, int(raw_id))
+        log = await crud.sleep_by_id(session, user.child_id, int(raw_id)) if user else None
         if not user or not log or log.child_id != user.child_id:
             await callback.message.answer("Запись недоступна.")
             return
@@ -181,31 +200,34 @@ async def adjust_time(callback: CallbackQuery, bot: Bot) -> None:
         if new_value > utc_now() + timedelta(minutes=2):
             await callback.message.answer("Нельзя указать время в будущем.")
             return
-        if field == "start":
-            if log.end_time and new_value >= log.end_time:
-                await callback.message.answer("Начало должно быть раньше окончания.")
-                return
-            previous = await crud.previous_completed_sleep(session, user.child_id, new_value)
-            if previous and previous.end_time and new_value <= previous.end_time:
-                await callback.message.answer("Время пересекается с прошлым сном.")
-                return
-            log.start_time = new_value
-            if log.end_time:
-                await crud.finish_sleep(session, log, log.end_time, user.child.timezone)
-        else:
-            if new_value <= log.start_time:
-                await callback.message.answer("Окончание должно быть позже начала.")
-                return
-            await crud.finish_sleep(session, log, new_value, user.child.timezone)
-        child_id, birth, timezone = user.child_id, user.child.birth_date, user.child.timezone
-    if field == "start" and log.end_time is None:
-        schedule_after_sleep(bot, child_id, log.id, new_value)
-    elif field == "end":
-        schedule_after_wake(bot, child_id, birth, new_value)
+        candidate_start = new_value if field == "start" else log.start_time
+        candidate_end = new_value if field == "end" else log.end_time
+        if candidate_end is not None and candidate_end - candidate_start >= timedelta(hours=24):
+            await callback.message.answer("Интервал сна не может длиться 24 часа или больше.")
+            return
+        updated, status = await crud.update_sleep_interval(
+            session,
+            user.child_id,
+            log.id,
+            candidate_start,
+            candidate_end,
+            user.child.timezone,
+            edited_by_user_id=user.id,
+        )
+        if status != "updated":
+            detail = (
+                "Новое время пересекается с другой записью сна."
+                if status in {"overlap", "duplicate"}
+                else "Начало должно быть раньше окончания."
+            )
+            await callback.message.answer(detail)
+            return
+        child_id, timezone, author = user.child_id, user.child.timezone, user.display_name
+    await resync_child_runtime(bot, child_id)
     sign = "+" if delta > 0 else ""
     await callback.message.answer(
         f"✏️ Время изменено на {sign}{delta} мин: {to_local(new_value, timezone):%H:%M}.\n"
-        f"<i>Изменил(а): {user.display_name}</i>"
+        f"<i>Изменил(а): {author}</i>"
     )
 
 
@@ -217,8 +239,17 @@ async def edit_time_save(message: Message, state: FSMContext, bot: Bot) -> None:
         if not user:
             await state.clear()
             return
-        value = parse_relative_time(message.text, user.child.timezone)
-        log = await session.get(SleepLog, data["log_id"])
+        log = await crud.sleep_by_id(session, user.child_id, data["log_id"])
+        if log is None:
+            anchor_value = utc_now()
+        elif data["field"] == "start":
+            anchor_value = log.start_time
+        else:
+            anchor_value = log.end_time or utc_now()
+        anchor_date = to_local(anchor_value, user.child.timezone).date()
+        value = parse_anchored_local_time(message.text, anchor_date, user.child.timezone)
+        if value is None:
+            value = parse_relative_time(message.text, user.child.timezone)
         if not value:
             await message.answer("Не понял время. Пример: 14:15 или «20 минут назад».")
             return
@@ -226,25 +257,42 @@ async def edit_time_save(message: Message, state: FSMContext, bot: Bot) -> None:
             await state.clear()
             await message.answer("Запись не найдена.")
             return
-        if data["field"] == "start":
-            if log.end_time and value >= log.end_time:
-                await message.answer("Начало должно быть раньше окончания сна.")
-                return
-            log.start_time = value
-            if log.end_time:
-                await crud.finish_sleep(session, log, log.end_time, user.child.timezone)
-        else:
-            if value <= log.start_time:
-                await message.answer("Пробуждение должно быть позже засыпания.")
-                return
-            await crud.finish_sleep(session, log, value, user.child.timezone)
-        child_id, birth, field = user.child_id, user.child.birth_date, data["field"]
+        if value > utc_now() + timedelta(minutes=2):
+            await message.answer("Нельзя указать время в будущем.")
+            return
+        candidate_start = value if data["field"] == "start" else log.start_time
+        candidate_end = value if data["field"] == "end" else log.end_time
+        if candidate_end is not None and candidate_end - candidate_start >= timedelta(hours=24):
+            await message.answer("Интервал сна не может длиться 24 часа или больше.")
+            return
+        updated, status = await crud.update_sleep_interval(
+            session,
+            user.child_id,
+            log.id,
+            candidate_start,
+            candidate_end,
+            user.child.timezone,
+            expected_start=data.get("expected_start"),
+            expected_end=data.get("expected_end"),
+            check_expected="expected_start" in data,
+            edited_by_user_id=user.id,
+        )
+        if status == "stale":
+            await state.clear()
+            await message.answer("Запись уже изменил другой родитель. Откройте историю заново.")
+            return
+        if status != "updated":
+            detail = (
+                "Новое время пересекается с другой записью сна."
+                if status in {"overlap", "duplicate"}
+                else "Проверьте начало и окончание сна."
+            )
+            await message.answer(detail)
+            return
+        child_id, timezone = user.child_id, user.child.timezone
     await state.clear()
-    if field == "start" and log.end_time is None:
-        schedule_after_sleep(bot, child_id, log.id, value)
-    elif field == "end":
-        schedule_after_wake(bot, child_id, birth, value)
-    await message.answer(f"Время исправлено на {to_local(value, user.child.timezone):%H:%M}.")
+    await resync_child_runtime(bot, child_id)
+    await message.answer(f"Время исправлено на {to_local(value, timezone):%H:%M}.")
 
 
 @router.message(F.text.regexp(r"(?i)^(уснул|уснула|заснул|проснулся|проснулась)"))

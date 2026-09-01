@@ -19,6 +19,38 @@ def local_to_utc(value: datetime, timezone_name: str) -> datetime:
     return value.replace(tzinfo=ZoneInfo(timezone_name)).astimezone(timezone.utc).replace(tzinfo=None)
 
 
+def parse_anchored_local_time(
+    text: str,
+    anchor_date: date,
+    timezone_name: str,
+) -> datetime | None:
+    """Разбирает ЧЧ:ММ на дате записи либо полное ДД.ММ.ГГГГ ЧЧ:ММ."""
+    match = re.fullmatch(
+        r"\s*(?:(\d{1,2})[./](\d{1,2})(?:[./](\d{2,4}))?\s+)?"
+        r"(\d{1,2})[:.](\d{2})\s*",
+        text,
+    )
+    if not match:
+        return None
+    day_raw, month_raw, year_raw, hour_raw, minute_raw = match.groups()
+    year = anchor_date.year if year_raw is None else int(year_raw)
+    if year < 100:
+        year += 2000
+    try:
+        selected_date = (
+            anchor_date
+            if day_raw is None
+            else date(year, int(month_raw), int(day_raw))
+        )
+        local_value = datetime.combine(
+            selected_date,
+            time(int(hour_raw), int(minute_raw)),
+        )
+    except ValueError:
+        return None
+    return local_to_utc(local_value, timezone_name)
+
+
 def local_day_start_utc(timezone_name: str, now: datetime | None = None) -> datetime:
     current = to_local(now or utc_now(), timezone_name)
     local_start = datetime.combine(current.date(), time.min)

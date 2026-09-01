@@ -116,10 +116,19 @@ def test_ai_history_and_new_keyboards():
     assert "🧠 AI-Режим" in labels
     assert "📊 График снов" in labels
     assert labels.count("💬 Чат с ИИ-консультантом") == 1
+    assert labels.count("📋 История записей") == 1
     sleeping_labels = [button.text for row in main_keyboard(True).keyboard for button in row]
     assert sleeping_labels[0] == "☀️ Проснулся"
     assert "💤 Уснул" not in sleeping_labels
-    assert history_keyboard([1], 0, 1).inline_keyboard[0][0].callback_data == "history:delete:1:0"
+    assert sleeping_labels.count("📋 История записей") == 1
+    history_callbacks = [
+        button.callback_data
+        for row in history_keyboard([1], 0, 1).inline_keyboard
+        for button in row
+    ]
+    assert "history:edit:1:0" in history_callbacks
+    assert "history:delete:1:0" in history_callbacks
+    assert "history:add:0" in history_callbacks
     assert ai_dialog_exit_keyboard().inline_keyboard[0][0].callback_data == "ai:dialog:exit"
 
 
@@ -270,6 +279,8 @@ def test_ai_dialog_router_precedes_standard_text_handlers():
     assert AIState.in_dialog.state == "AIState:in_dialog"
     assert names.index("ai_dialog") < names.index("common")
     assert names.index("ai_dialog") < names.index("sleep")
+    assert names.index("history") < names.index("sleep")
+    assert names.index("history") < names.index("parser")
 
 
 def test_ai_card_is_html_safe_and_fits_telegram_limit():

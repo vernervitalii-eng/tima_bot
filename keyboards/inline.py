@@ -122,13 +122,25 @@ def ai_dialog_exit_keyboard() -> InlineKeyboardMarkup:
 
 
 def history_keyboard(log_ids: list[int], page: int, total_pages: int) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(
-            text=f"🗑 Удалить запись №{index}",
-            callback_data=f"history:delete:{log_id}:{page}",
-        )]
-        for index, log_id in enumerate(log_ids, start=1)
-    ]
+    rows = []
+    for index, log_id in enumerate(log_ids, start=1):
+        position = page * 10 + index
+        rows.append([
+            InlineKeyboardButton(
+                text=f"✏️ Изменить №{position}",
+                callback_data=f"history:edit:{log_id}:{page}",
+            ),
+            InlineKeyboardButton(
+                text=f"🗑 Удалить №{position}",
+                callback_data=f"history:delete:{log_id}:{page}",
+            ),
+        ])
+    rows.append([
+        InlineKeyboardButton(
+            text="➕ Добавить пропущенный сон",
+            callback_data=f"history:add:{page}",
+        )
+    ])
     navigation: list[InlineKeyboardButton] = []
     if page > 0:
         navigation.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"history:page:{page - 1}"))
@@ -137,6 +149,41 @@ def history_keyboard(log_ids: list[int], page: int, total_pages: int) -> InlineK
     if navigation:
         rows.append(navigation)
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def history_edit_keyboard(log_id: int, page: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(
+                text="🕒 Изменить начало",
+                callback_data=f"history:field:start:{log_id}:{page}",
+            ),
+            InlineKeyboardButton(
+                text="🕓 Изменить окончание",
+                callback_data=f"history:field:end:{log_id}:{page}",
+            ),
+        ],
+        [InlineKeyboardButton(text="↩️ Назад к истории", callback_data=f"history:page:{page}")],
+    ])
+
+
+def history_edit_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Сохранить изменение", callback_data="history:edit:save"),
+            InlineKeyboardButton(text="↩️ Отмена", callback_data="history:edit:cancel"),
+        ]
+    ])
+
+
+def history_add_confirmation_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Сохранить сон", callback_data="history:add:save"),
+            InlineKeyboardButton(text="✏️ Ввести заново", callback_data="history:add:retry"),
+        ],
+        [InlineKeyboardButton(text="❌ Отмена", callback_data="history:add:cancel")],
+    ])
 
 
 def history_delete_confirmation_keyboard(log_id: int, page: int) -> InlineKeyboardMarkup:
