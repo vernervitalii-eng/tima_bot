@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -9,6 +10,13 @@ from dotenv import load_dotenv
 
 
 PROJECT_DIR = Path(__file__).resolve().parent
+load_dotenv(PROJECT_DIR / ".env")
+DB_DIR = Path(os.getenv("DB_DIR", str(PROJECT_DIR / "data"))).expanduser()
+if not DB_DIR.is_absolute():
+    DB_DIR = PROJECT_DIR / DB_DIR
+DB_DIR = DB_DIR.resolve()
+DEFAULT_DB_PATH = DB_DIR / "baby_tracker.db"
+LEGACY_DB_PATH = PROJECT_DIR / "sleep_tracker.db"
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,15 +51,41 @@ def normalize_database_url(url: str) -> str:
     return value
 
 
-def normalize_db_path(raw_path: str) -> str:
+def normalize_db_path(raw_path: str, base_dir: Path | None = None) -> str:
     """Возвращает постоянный абсолютный путь SQLite, не создавая и не удаляя БД."""
     value = raw_path.strip()
     if not value:
         return ""
     path = Path(value)
     if not path.is_absolute():
-        path = PROJECT_DIR / path
+        path = (base_dir or DB_DIR) / path
     return str(path.resolve())
+
+
+def _prepare_default_sqlite_path() -> str:
+    """Создаёт каталог и бережно переносит legacy-БД без удаления оригинала."""
+    _preserve_legacy_database(DEFAULT_DB_PATH)
+    return str(DEFAULT_DB_PATH)
+
+
+def _preserve_legacy_database(target_path: Path) -> None:
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    if (
+        not target_path.exists()
+        and LEGACY_DB_PATH.exists()
+        and LEGACY_DB_PATH.is_file()
+        and target_path.resolve() != LEGACY_DB_PATH.resolve()
+    ):
+        shutil.copy2(LEGACY_DB_PATH, target_path)
+
+
+def _sqlite_path_from_url(database_url: str) -> str:
+    for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
+        if database_url.startswith(prefix):
+            location = database_url[len(prefix):]
+            if location != ":memory:" and not location.startswith("file:"):
+                return normalize_db_path(location, PROJECT_DIR)
+    return ""
 
 
 def parse_allowed_ids(raw_value: str) -> frozenset[int]:
@@ -72,21 +106,18 @@ def load_settings() -> Settings:
         raise RuntimeError("BOT_TOKEN не задан. Скопируйте .env.example в .env и укажите токен.")
     if ":" not in token or not token.split(":", 1)[0].isdigit():
         raise RuntimeError("BOT_TOKEN имеет неверный формат. Нужен API Token от @BotFather, а не Telegram ID.")
-    raw_database_url = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///sleep_tracker.db")
-    db_path = normalize_db_path(os.getenv("DB_PATH", ""))
-    if db_path and (Path(db_path).exists() and Path(db_path).is_dir()):
-        raise RuntimeError(f"DB_PATH указывает на каталог, а не на файл: {db_path}")
-    if db_path and (raw_database_url.strip().startswith("sqlite") or not raw_database_url.strip()):
-        database_url = f"sqlite+aiosqlite:///{Path(db_path).as_posix()}"
-    else:
+    raw_database_url = os.getenv("DATABASE_URL", "").strip()
+    raw_db_path = os.getenv("DB_PATH", "").strip()
+    if raw_database_url:
         database_url = normalize_database_url(raw_database_url)
-    if not db_path and database_url.startswith("sqlite"):
-        for prefix in ("sqlite+aiosqlite:///", "sqlite:///"):
-            if database_url.startswith(prefix):
-                location = database_url[len(prefix):]
-                if location not in {":memory:"} and not location.startswith("file:"):
-                    db_path = normalize_db_path(location)
-                break
+        db_path = _sqlite_path_from_url(database_url)
+    else:
+        db_path = normalize_db_path(raw_db_path) if raw_db_path else _prepare_default_sqlite_path()
+        _preserve_legacy_database(Path(db_path))
+        database_url = f"sqlite+aiosqlite:///{Path(db_path).as_posix()}"
+
+    if db_path and Path(db_path).exists() and Path(db_path).is_dir():
+        raise RuntimeError(f"DB_PATH указывает на каталог, а не на файл: {db_path}")
     if db_path and database_url.startswith("sqlite"):
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
 

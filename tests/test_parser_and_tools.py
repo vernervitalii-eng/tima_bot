@@ -7,18 +7,15 @@ from database.session import close_db, db_session, init_db
 from parser import parse_text
 
 
-def test_parser_supports_ranges_dates_feeding_and_walks():
+def test_parser_supports_only_sleep_ranges_and_dates():
     result = parse_text(
         "04.08 10:15-11:30 спал\n"
-        "вчера уснул в 21:00 проснулся в 07:30\n"
-        "поел смесь 150мл в 12:00\n"
-        "гуляли 1.5 часа",
+        "вчера уснул в 21:00 проснулся в 07:30",
         date(2026, 8, 31),
     )
     assert any(item.duration_minutes == 75 for item in result.sleeps)
     assert any(item.start.date() == date(2026, 8, 30) and item.end.date() == date(2026, 8, 31) for item in result.sleeps if item.end)
-    assert any(item.kind == "feeding" and item.at.hour == 12 for item in result.activities)
-    assert any(item.kind == "walk" and item.duration_minutes == 90 for item in result.activities)
+    assert len(result.sleeps) == 2
 
 
 def test_august_seed_source_is_parseable():
@@ -38,12 +35,16 @@ def test_seed_monthly_data_is_idempotent(tmp_path):
         await init_db(f"sqlite+aiosqlite:///{db_path}")
         async with db_session() as session:
             admin = await crud.create_family(session, 902001, "Seed", date(2025, 1, 1), "UTC")
-            first = await crud.seed_monthly_data(session, admin.child_id, admin.id, parsed.sleeps, parsed.activities)
-            second = await crud.seed_monthly_data(session, admin.child_id, admin.id, parsed.sleeps, parsed.activities)
+            first = await crud.seed_monthly_data(session, admin.child_id, admin.id, parsed.sleeps)
+            second = await crud.seed_monthly_data(session, admin.child_id, admin.id, parsed.sleeps)
             assert first["sleep_added"] == 1
             assert second["sleep_added"] == 0
             assert second["sleep_skipped"] == 1
+            rows, total = await crud.sleep_history_page(session, admin.child_id)
+            assert total == 1
+            assert await crud.delete_sleep_log(session, admin.child_id, rows[0].id)
+            _, total_after_delete = await crud.sleep_history_page(session, admin.child_id)
+            assert total_after_delete == 0
         await close_db()
 
     asyncio.run(scenario())
-

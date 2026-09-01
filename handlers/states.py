@@ -10,10 +10,6 @@ class EditTime(StatesGroup):
     value = State()
 
 
-class NoteActivity(StatesGroup):
-    value = State()
-
-
 class SettingsEdit(StatesGroup):
     birth_date = State()
 

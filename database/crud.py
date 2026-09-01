@@ -6,12 +6,12 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from datetime import timezone
 
-from sqlalchemy import delete, or_, select, update
+from sqlalchemy import delete, func, inspect, or_, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import ActivityLog, Child, SleepLog, SleepType, User, UserRole
+from database.models import Child, SleepLog, SleepType, User, UserRole
 
 
 async def get_user(session: AsyncSession, telegram_id: int) -> User | None:
@@ -186,19 +186,6 @@ async def family_telegram_ids(session: AsyncSession, child_id: int) -> list[int]
     return list(await session.scalars(select(User.telegram_id).where(User.child_id == child_id)))
 
 
-async def add_activity(
-    session: AsyncSession, child_id: int, activity_type: str, at: datetime,
-    details: str | None = None, created_by_user_id: int | None = None,
-) -> ActivityLog:
-    row = ActivityLog(
-        child_id=child_id, activity_type=activity_type, timestamp=at,
-        details=details, created_by_user_id=created_by_user_id,
-    )
-    session.add(row)
-    await session.flush()
-    return row
-
-
 async def family_members(session: AsyncSession, child_id: int) -> list[User]:
     return list(await session.scalars(select(User).where(User.child_id == child_id).order_by(User.id)))
 
@@ -212,50 +199,19 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
     return await session.get(User, user_id)
 
 
-async def latest_activity(session: AsyncSession, child_id: int, activity_type: str) -> ActivityLog | None:
-    return await session.scalar(
-        select(ActivityLog)
-        .where(ActivityLog.child_id == child_id, ActivityLog.activity_type == activity_type)
-        .order_by(ActivityLog.timestamp.desc())
-    )
-
-
-async def activities_since(session: AsyncSession, child_id: int, since: datetime) -> list[ActivityLog]:
-    return list(await session.scalars(
-        select(ActivityLog)
-        .where(ActivityLog.child_id == child_id, ActivityLog.timestamp >= since)
-        .order_by(ActivityLog.timestamp)
-    ))
-
-
-async def activities_between(
-    session: AsyncSession, child_id: int, since: datetime, until: datetime
-) -> list[ActivityLog]:
-    return list(await session.scalars(
-        select(ActivityLog)
-        .where(
-            ActivityLog.child_id == child_id,
-            ActivityLog.timestamp >= since,
-            ActivityLog.timestamp < until,
-        )
-        .order_by(ActivityLog.timestamp)
-    ))
-
-
 async def seed_monthly_data(
     session: AsyncSession,
     child_id: int,
     user_id: int,
     sleeps: Iterable[object],
-    activities: Iterable[object] = (),
 ) -> dict[str, int]:
     """Идемпотентно добавляет распарсенную историю, не изменяя существующие строки.
 
-    Объекты принимаются по атрибутам ``start``, ``end``, ``sleep_type`` и
-    ``at``, ``kind``, ``details``. Это сознательно отделяет NLP-парсер от ORM.
+    Объекты принимаются по атрибутам ``start``, ``end`` и ``sleep_type``.
+    Это сознательно отделяет NLP-парсер от ORM.
     Дубликатом считается тот же ребёнок и та же дата/время события.
     """
-    result = {"sleep_added": 0, "sleep_skipped": 0, "activity_added": 0, "activity_skipped": 0}
+    result = {"sleep_added": 0, "sleep_skipped": 0}
     for item in sleeps:
         start = getattr(item, "start")
         end = getattr(item, "end", None)
@@ -285,34 +241,45 @@ async def seed_monthly_data(
         ))
         result["sleep_added"] += 1
 
-    for item in activities:
-        at = getattr(item, "at", None)
-        if at is None:
-            result["activity_skipped"] += 1
-            continue
-        activity_type = getattr(item, "kind", "notes")
-        details = getattr(item, "details", None) or None
-        exists = await session.scalar(
-            select(ActivityLog.id).where(
-                ActivityLog.child_id == child_id,
-                ActivityLog.activity_type == activity_type,
-                ActivityLog.timestamp == at,
-                ActivityLog.details == details,
-            ).limit(1)
-        )
-        if exists is not None:
-            result["activity_skipped"] += 1
-            continue
-        session.add(ActivityLog(
-            child_id=child_id,
-            activity_type=activity_type,
-            timestamp=at,
-            details=details,
-            created_by_user_id=user_id,
-        ))
-        result["activity_added"] += 1
     await session.flush()
     return result
+
+
+async def sleep_history_page(
+    session: AsyncSession,
+    child_id: int,
+    page: int = 0,
+    page_size: int = 10,
+) -> tuple[list[SleepLog], int]:
+    """Возвращает одну страницу записей сна и общее число записей."""
+    page = max(page, 0)
+    page_size = min(max(page_size, 1), 50)
+    total = int(await session.scalar(
+        select(func.count(SleepLog.id)).where(SleepLog.child_id == child_id)
+    ) or 0)
+    rows = await session.scalars(
+        select(SleepLog)
+        .where(SleepLog.child_id == child_id)
+        .order_by(SleepLog.start_time.desc(), SleepLog.id.desc())
+        .offset(page * page_size)
+        .limit(page_size)
+    )
+    return list(rows), total
+
+
+async def sleep_by_id(session: AsyncSession, child_id: int, log_id: int) -> SleepLog | None:
+    return await session.scalar(
+        select(SleepLog).where(SleepLog.id == log_id, SleepLog.child_id == child_id)
+    )
+
+
+async def delete_sleep_log(session: AsyncSession, child_id: int, log_id: int) -> bool:
+    """Удаляет только выбранную запись сна текущего семейного профиля."""
+    result = await session.execute(
+        delete(SleepLog).where(SleepLog.id == log_id, SleepLog.child_id == child_id)
+    )
+    await session.flush()
+    return result.rowcount == 1
 
 
 async def leave_family(session: AsyncSession, user: User) -> None:
@@ -323,7 +290,15 @@ async def leave_family(session: AsyncSession, user: User) -> None:
 
 async def delete_family(session: AsyncSession, child_id: int) -> None:
     """Полностью удаляет профиль ребёнка и все связанные данные."""
-    await session.execute(delete(ActivityLog).where(ActivityLog.child_id == child_id))
+    # Ранние версии создавали activity_logs. Рабочий код больше не использует
+    # эту таблицу, но при явно подтверждённом удалении семьи legacy-строки надо
+    # убрать до пользователей, иначе старый FK может заблокировать операцию.
+    connection = await session.connection()
+    has_legacy_activity_table = await connection.run_sync(
+        lambda sync_connection: inspect(sync_connection).has_table("activity_logs")
+    )
+    if has_legacy_activity_table:
+        await session.execute(text("DELETE FROM activity_logs WHERE child_id = :child_id"), {"child_id": child_id})
     await session.execute(delete(SleepLog).where(SleepLog.child_id == child_id))
     await session.execute(delete(User).where(User.child_id == child_id))
     await session.execute(delete(Child).where(Child.id == child_id))

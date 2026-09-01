@@ -36,12 +36,6 @@ async def main() -> None:
         assert active and active.id == sleep_id
         assert await crud.try_finish_sleep(session, active, now + timedelta(hours=1), member.child.timezone, member.id)
         assert not await crud.try_finish_sleep(session, active, now + timedelta(hours=1, minutes=1), member.child.timezone, member.id)
-        await crud.add_activity(session, member.child_id, "feeding", now, "грудь", member.id)
-    async with db_session() as session:
-        member = await crud.get_user(session, 1002)
-        feeding = await crud.latest_activity(session, member.child_id, "feeding")
-        assert feeding and feeding.created_by_user_id == member.id
-
     # Администратор может заранее добавить участника по Telegram ID.
     async with db_session() as session:
         admin = await crud.get_user(session, 1001)

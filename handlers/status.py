@@ -20,7 +20,6 @@ async def current_status(message: Message) -> None:
             return
         active = await crud.active_sleep(session, user.child_id)
         last_sleep = await crud.last_completed_sleep(session, user.child_id)
-        feeding = await crud.latest_activity(session, user.child_id, "feeding")
 
         if active:
             creator = await crud.get_user_by_id(session, active.created_by_user_id)
@@ -42,17 +41,9 @@ async def current_status(message: Message) -> None:
         else:
             sleep_line = "Последний завершённый сон: нет данных."
 
-        if feeding:
-            author = await crud.get_user_by_id(session, feeding.created_by_user_id) if feeding.created_by_user_id else None
-            feeding_line = (
-                f"Последнее кормление: {format_duration(now - feeding.timestamp)} назад "
-                f"({author.display_name if author else 'автор не указан'}, {feeding.details or 'тип не указан'})."
-            )
-        else:
-            feeding_line = "Последнее кормление: нет данных."
         silent = user.child.silent_mode and is_quiet_hours(user.child.timezone)
 
     await message.answer(
-        f"📌 <b>Текущий статус</b>\n\n{status_line}\n{sleep_line}\n{feeding_line}",
+        f"📌 <b>Текущий статус</b>\n\n{status_line}\n{sleep_line}",
         disable_notification=silent,
     )

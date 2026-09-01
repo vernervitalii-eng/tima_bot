@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import sqlite3
+import tempfile
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, closing
 from pathlib import Path
 
 from sqlalchemy import text
@@ -28,6 +30,8 @@ async def init_db(url: str) -> None:
             if url.startswith("sqlite"):
                 await connection.execute(text("PRAGMA busy_timeout=30000"))
                 await connection.execute(text("PRAGMA foreign_keys=ON"))
+                await connection.execute(text("PRAGMA journal_mode=WAL"))
+                await connection.execute(text("PRAGMA synchronous=NORMAL"))
             # Явный IF NOT EXISTS исключает пересоздание существующих таблиц даже
             # при одновременном старте двух экземпляров приложения.
             for table in Base.metadata.sorted_tables:
@@ -54,9 +58,6 @@ async def _migrate_sqlite(connection) -> None:
     user_columns = await columns("users")
     if "display_name" not in user_columns:
         await connection.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(80) NOT NULL DEFAULT 'Член семьи'"))
-    activity_columns = await columns("activity_logs")
-    if "created_by_user_id" not in activity_columns:
-        await connection.execute(text("ALTER TABLE activity_logs ADD COLUMN created_by_user_id INTEGER REFERENCES users(id)"))
     sleep_columns = await columns("sleep_logs")
     if "ended_by_user_id" not in sleep_columns:
         await connection.execute(text("ALTER TABLE sleep_logs ADD COLUMN ended_by_user_id INTEGER REFERENCES users(id)"))
@@ -73,9 +74,6 @@ async def _migrate_postgresql(connection) -> None:
     ))
     await connection.execute(text(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(80) NOT NULL DEFAULT 'Член семьи'"
-    ))
-    await connection.execute(text(
-        "ALTER TABLE activity_logs ADD COLUMN IF NOT EXISTS created_by_user_id INTEGER REFERENCES users(id)"
     ))
     await connection.execute(text(
         "ALTER TABLE sleep_logs ADD COLUMN IF NOT EXISTS ended_by_user_id INTEGER REFERENCES users(id)"
@@ -110,11 +108,24 @@ async def close_db() -> None:
 
 
 async def read_sqlite_bytes(db_path: str) -> bytes:
-    """Снимает байтовую копию SQLite после завершения текущей транзакции."""
+    """Создаёт согласованную online-копию SQLite, включая данные из WAL."""
     if not db_path:
         raise RuntimeError("Для PostgreSQL файловый backup недоступен")
     path = Path(db_path)
     if not path.exists() or not path.is_file():
         raise FileNotFoundError(f"Файл базы данных не найден: {path}")
+    def create_backup() -> bytes:
+        temporary_name: str | None = None
+        try:
+            with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as temporary:
+                temporary_name = temporary.name
+            with closing(sqlite3.connect(path, timeout=30.0)) as source:
+                with closing(sqlite3.connect(temporary_name, timeout=30.0)) as target:
+                    source.backup(target)
+            return Path(temporary_name).read_bytes()
+        finally:
+            if temporary_name:
+                Path(temporary_name).unlink(missing_ok=True)
+
     async with db_lock:
-        return await asyncio.to_thread(path.read_bytes)
+        return await asyncio.to_thread(create_backup)

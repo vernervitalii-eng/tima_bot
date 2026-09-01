@@ -39,7 +39,6 @@ async def export_csv(callback: CallbackQuery) -> None:
             await callback.message.answer("Сначала выполните /start.")
             return
         sleeps = await crud.sleeps_overlapping(session, user.child_id, since, now)
-        activities = await crud.activities_since(session, user.child_id, since)
         members = await crud.family_members(session, user.child_id)
         authors = {member.id: member.display_name for member in members}
         timezone = user.child.timezone
@@ -51,7 +50,7 @@ async def export_csv(callback: CallbackQuery) -> None:
     writer = csv.writer(stream, delimiter=";", quoting=csv.QUOTE_MINIMAL)
     writer.writerow([
         "Категория", "Событие", "Начало (локальное)", "Окончание (локальное)",
-        "Длительность, мин", "Подробности", "Автор начала/активности", "Автор окончания",
+        "Длительность, мин", "Автор начала", "Автор окончания",
     ])
     rows: list[tuple] = []
     for log in sleeps:
@@ -63,22 +62,8 @@ async def export_csv(callback: CallbackQuery) -> None:
             to_local(log.start_time, timezone).strftime("%Y-%m-%d %H:%M"),
             to_local(log.end_time, timezone).strftime("%Y-%m-%d %H:%M") if log.end_time else "Продолжается",
             max(int((end - log.start_time).total_seconds() // 60), 0),
-            "",
             authors.get(log.created_by_user_id, "Не указан"),
             authors.get(log.ended_by_user_id, "Не указан") if log.end_time else "",
-        ))
-    activity_labels = {"feeding": "Кормление", "diaper": "Подгузник", "notes": "Заметка"}
-    for activity in activities:
-        rows.append((
-            activity.timestamp,
-            "Активность",
-            activity_labels.get(activity.activity_type, activity.activity_type),
-            to_local(activity.timestamp, timezone).strftime("%Y-%m-%d %H:%M"),
-            "",
-            "",
-            activity.details or "",
-            authors.get(activity.created_by_user_id, "Не указан"),
-            "",
         ))
     for row in sorted(rows, key=lambda item: item[0]):
         writer.writerow(row[1:])

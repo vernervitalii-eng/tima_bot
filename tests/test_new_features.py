@@ -1,7 +1,10 @@
+import ast
 from datetime import date, datetime, timedelta
+from pathlib import Path
 
-from database.models import ActivityLog, SleepLog, SleepType
-from keyboards.inline import ai_refresh_keyboard, day_date_keyboard, day_period_keyboard
+from database.models import SleepLog, SleepType
+from chart_generator import generate_sleep_chart
+from keyboards.inline import ai_refresh_keyboard, day_date_keyboard, day_period_keyboard, history_keyboard
 from keyboards.main import main_keyboard
 from services.ai_analyst import RoutineAnalysis, ScheduleItem, build_sleep_history, format_analysis_card
 from services.day_timeline import build_day_timeline, local_date_bounds_utc
@@ -26,31 +29,20 @@ def test_day_timeline_calculates_sleep_and_wake_intervals():
         sleep(datetime(2025, 3, 20, 13), datetime(2025, 3, 20, 14)),
         sleep(datetime(2025, 3, 20, 18), datetime(2025, 3, 21, 6), SleepType.NIGHT.value),
     ]
-    activities = [
-        ActivityLog(
-            child_id=1,
-            activity_type="feeding",
-            timestamp=datetime(2025, 3, 20, 10),
-            details="грудь",
-            created_by_user_id=1,
-        )
-    ]
     card = build_day_timeline(
         "Тима <3",
         selected,
         "UTC",
         logs,
-        activities,
         wake_target_minutes=180,
         now=datetime(2025, 3, 21, 12),
     )
-    assert "РЕЖИМ ДНЯ • 20 МАРТА" in card
+    assert "ХРОНОЛОГИЯ • 20 МАРТА" in card
     assert "Тима &lt;3" in card
     assert "Подъём" in card
     assert "ВБ: 2 ч 30 мин" in card
-    assert "Кормление • Грудь" in card
     assert "Дневной сон: <code>2 ч 00 мин</code> (2 снов)" in card
-    assert "Общий сон: <code>14 ч 00 мин</code>" in card
+    assert "Всего сна за сутки: <code>14 ч 00 мин</code>" in card
 
 
 def test_local_date_bounds_are_timezone_aware():
@@ -101,16 +93,19 @@ def test_ai_history_and_new_keyboards():
 
     labels = [button.text for row in main_keyboard(False).keyboard for button in row]
     assert "📅 Хронология дня" in labels
-    assert "🧠 AI-анализ" in labels
+    assert "📋 История записей" in labels
+    assert "🧠 AI-Режим (Gemini)" in labels
+    assert "📊 График снов" in labels
+    assert history_keyboard([1], 0, 1).inline_keyboard[0][0].callback_data == "history:delete:1:0"
 
 
 def test_ai_card_is_html_safe_and_fits_telegram_limit():
     analysis = RoutineAnalysis(
         insights=["Стабильное окно <10:30>", "Позднее укладывание"],
         schedule=[
-            ScheduleItem(time="07:15", activity="Подъём"),
-            ScheduleItem(time="10:30–11:45", activity="Первый сон"),
-            ScheduleItem(time="20:15", activity="Ночной сон"),
+            ScheduleItem(time="07:15", event="Подъём"),
+            ScheduleItem(time="10:30–11:45", event="Первый сон"),
+            ScheduleItem(time="20:15", event="Ночной сон"),
         ],
         tips=["Начинать ритуал заранее", "Следить за признаками усталости"],
         caveat="Данных пока немного",
@@ -119,3 +114,42 @@ def test_ai_card_is_html_safe_and_fits_telegram_limit():
     assert "&lt;10:30&gt;" in card
     assert "На основе 14 дней" in card
     assert len(card) < 4096
+
+
+def test_chart_generator_returns_png_buffer():
+    logs = [sleep(datetime(2025, 3, 19, 20), datetime(2025, 3, 20, 7), SleepType.NIGHT.value)]
+    image = generate_sleep_chart(
+        logs,
+        "UTC",
+        date(2025, 3, 18),
+        date(2025, 3, 20),
+        norm_hours=13,
+        child_name="Тест",
+    )
+    assert image.getvalue().startswith(b"\x89PNG\r\n\x1a\n")
+
+
+def test_all_callback_handlers_answer_immediately():
+    for path in Path("handlers").glob("*.py"):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.AsyncFunctionDef):
+                continue
+            is_callback = any(
+                isinstance(decorator, ast.Call)
+                and isinstance(decorator.func, ast.Attribute)
+                and decorator.func.attr == "callback_query"
+                for decorator in node.decorator_list
+            )
+            if not is_callback:
+                continue
+            first = node.body[0]
+            assert isinstance(first, ast.Expr) and isinstance(first.value, ast.Await), (
+                path, node.name
+            )
+            call = first.value.value
+            assert (
+                isinstance(call, ast.Call)
+                and isinstance(call.func, ast.Attribute)
+                and call.func.attr == "answer"
+            ), (path, node.name)

@@ -3,7 +3,7 @@ from datetime import date, datetime
 from services.norms import norm_for_age
 from services.time_utils import age_parts, is_quiet_hours, parse_relative_time
 from keyboards.inline import family_keyboard, settings_keyboard, start_choice_keyboard
-from config import PROJECT_DIR, normalize_database_url
+from config import DB_DIR, DEFAULT_DB_PATH, PROJECT_DIR, normalize_database_url
 from database.models import SleepLog
 from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlalchemy.dialects import postgresql, sqlite
@@ -53,6 +53,10 @@ def test_render_postgres_url_normalization():
         "sqlite+aiosqlite:///" + (PROJECT_DIR / "sleep_tracker.db").resolve().as_posix()
     )
     assert normalize_database_url("sqlite+aiosqlite:///:memory:") == "sqlite+aiosqlite:///:memory:"
+
+
+def test_default_sqlite_path_is_inside_data_directory():
+    assert DEFAULT_DB_PATH == DB_DIR / "baby_tracker.db"
 
 
 def test_postgres_active_sleep_unique_index():

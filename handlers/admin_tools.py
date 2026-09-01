@@ -21,7 +21,7 @@ SEED_FILE = Path(__file__).resolve().parents[1] / "data" / "august_2026.txt"
 
 
 def _utc_seed_events(parsed, timezone_name: str):
-    sleeps = [
+    return [
         replace(
             item,
             start=local_to_utc(item.start, timezone_name),
@@ -29,11 +29,6 @@ def _utc_seed_events(parsed, timezone_name: str):
         )
         for item in parsed.sleeps
     ]
-    activities = [
-        replace(item, at=local_to_utc(item.at, timezone_name) if item.at else None)
-        for item in parsed.activities
-    ]
-    return sleeps, activities
 
 
 @router.message(Command("seed_data"))
@@ -60,8 +55,8 @@ async def seed_data(message: Message, command: CommandObject) -> None:
             # повторный импорт после Нового года не создал записи в будущем.
             reference_date=date(2026, 8, 31),
         )
-        sleeps, activities = _utc_seed_events(parsed, user.child.timezone)
-        stats = await crud.seed_monthly_data(session, user.child_id, user.id, sleeps, activities)
+        sleeps = _utc_seed_events(parsed, user.child.timezone)
+        stats = await crud.seed_monthly_data(session, user.child_id, user.id, sleeps)
         child_name = user.child.name
 
     warning_text = ""
@@ -73,7 +68,6 @@ async def seed_data(message: Message, command: CommandObject) -> None:
         f"✅ <b>История августа загружена для {child_name}</b>\n\n"
         f"💤 Добавлено снов: <code>{stats['sleep_added']}</code>\n"
         f"↩️ Уже были в базе: <code>{stats['sleep_skipped']}</code>\n"
-        f"🍼 Добавлено активностей: <code>{stats['activity_added']}</code>\n"
         f"Повторный запуск безопасен и не создаёт дубликаты.{warning_text}"
     )
 

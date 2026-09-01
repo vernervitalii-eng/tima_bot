@@ -1,14 +1,18 @@
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
     pass
+
+
+def utc_now_naive() -> datetime:
+    return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
 class UserRole(StrEnum):
@@ -21,19 +25,13 @@ class SleepType(StrEnum):
     NIGHT = "night"
 
 
-class ActivityType(StrEnum):
-    FEEDING = "feeding"
-    DIAPER = "diaper"
-    NOTES = "notes"
-
-
 class Child(Base):
     __tablename__ = "children"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(80))
     birth_date: Mapped[date] = mapped_column(Date)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
     invite_code: Mapped[str] = mapped_column(String(12), unique=True, index=True)
     timezone: Mapped[str] = mapped_column(String(64), default="UTC")
     silent_mode: Mapped[bool] = mapped_column(Boolean, default=False)
@@ -77,15 +75,3 @@ class SleepLog(Base):
     ended_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     child: Mapped[Child] = relationship(back_populates="sleeps")
-
-
-class ActivityLog(Base):
-    __tablename__ = "activity_logs"
-    __table_args__ = (Index("ix_activity_child_time", "child_id", "timestamp"),)
-
-    id: Mapped[int] = mapped_column(primary_key=True)
-    child_id: Mapped[int] = mapped_column(ForeignKey("children.id", ondelete="CASCADE"))
-    activity_type: Mapped[str] = mapped_column(String(16))
-    timestamp: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
-    details: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)

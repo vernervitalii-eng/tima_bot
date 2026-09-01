@@ -1,4 +1,4 @@
-"""Устойчивый разбор коротких сообщений о сне, бодрствовании и питании.
+"""Устойчивый разбор коротких сообщений только о сне и бодрствовании.
 
 Парсер намеренно не пишет в базу: он возвращает нормализованные события, а
 сохранение выполняется отдельным слоем CRUD с дедупликацией. Это позволяет
@@ -13,7 +13,7 @@ from datetime import date, datetime, time, timedelta
 from typing import Literal
 
 
-EventKind = Literal["sleep_start", "wake", "feeding", "walk"]
+EventKind = Literal["sleep_start", "wake"]
 
 _TIME_RE = re.compile(r"(?<!\d)(?P<hour>\d{1,2})[:.](?P<minute>\d{2})(?!\d)")
 _DATE_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})[./](?P<month>\d{1,2})(?:[./](?P<year>\d{2,4}))?(?!\d)")
@@ -30,21 +30,6 @@ _POINT_WORD_FIRST_RE = re.compile(
     rf"(?P<kind>{_SLEEP_START_WORDS}|{_WAKE_WORDS})\s*(?:в\s*)?(?P<time>\d{{1,2}}[:.]\d{{2}})",
     re.IGNORECASE,
 )
-_DURATION_RE = re.compile(
-    r"(?P<value>\d+(?:[.,]\d+)?)\s*(?P<unit>час(?:а|ов)?|ч|мин(?:ут|уты)?)",
-    re.IGNORECASE,
-)
-
-
-@dataclass(frozen=True, slots=True)
-class ParsedActivity:
-    kind: Literal["feeding", "walk"]
-    at: datetime | None
-    details: str = ""
-    duration_minutes: int | None = None
-    source_line: str = ""
-
-
 @dataclass(frozen=True, slots=True)
 class ParsedSleep:
     start: datetime
@@ -58,7 +43,6 @@ class ParsedSleep:
 @dataclass(slots=True)
 class ParseResult:
     sleeps: list[ParsedSleep] = field(default_factory=list)
-    activities: list[ParsedActivity] = field(default_factory=list)
     point_events: list[tuple[EventKind, datetime, str]] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
 
@@ -93,15 +77,6 @@ def _at(base: date, raw: str, previous: datetime | None = None) -> datetime:
     return result
 
 
-def _duration_minutes(line: str) -> int | None:
-    match = _DURATION_RE.search(line)
-    if not match:
-        return None
-    value = float(match.group("value").replace(",", "."))
-    unit = match.group("unit").lower()
-    return round(value * 60) if unit.startswith(("час", "ч")) else round(value)
-
-
 def _event_kind(raw: str) -> EventKind:
     return "wake" if re.fullmatch(_WAKE_WORDS, raw, re.IGNORECASE) else "sleep_start"
 
@@ -110,14 +85,6 @@ def _sleep_type(start: datetime, duration_minutes: int | None) -> Literal["day",
     if start.hour >= 19 or start.hour < 6 or (duration_minutes is not None and duration_minutes >= 300):
         return "night"
     return "day"
-
-
-def _details_for_activity(line: str, kind: str) -> str:
-    normalized = re.sub(r"\s+", " ", line).strip(" -—–,.;")
-    if kind == "walk":
-        duration = _duration_minutes(normalized)
-        return f"Прогулка, {duration} мин" if duration is not None else "Прогулка"
-    return normalized[:300]
 
 
 def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
@@ -130,7 +97,6 @@ def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
     current_date = reference_date
     point_events: list[tuple[EventKind, datetime, str]] = []
     ranges: list[tuple[datetime, datetime, str]] = []
-    activities: list[ParsedActivity] = []
     warnings: list[str] = []
 
     for raw_line in text.splitlines():
@@ -151,10 +117,8 @@ def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
             except ValueError:
                 warnings.append(f"Пропущена некорректная дата: {date_match.group(0)}")
         range_match = _RANGE_RE.search(line)
-        has_feed = bool(re.search(r"\b(поел|поела|покушал|покушала|кормил|кормили|смесь|грудь|прикорм|обед|завтрак|ужин)\b", lower))
-        has_walk = bool(re.search(r"\b(гуляли?|прогулк[аиу]?)\b", lower))
         # Заголовок даты без событий только меняет контекст следующих строк.
-        if not _TIME_RE.search(line) and not _RANGE_RE.search(line) and not (has_feed or has_walk):
+        if not _TIME_RE.search(line) and not _RANGE_RE.search(line):
             continue
 
         if range_match and re.search(r"\b(спал|спала|сон|спит)\b", lower):
@@ -181,18 +145,6 @@ def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
             event_at = _at(line_date, clock, previous)
             point_events.append((kind, event_at, line))
             previous = event_at
-
-        if has_feed or has_walk:
-            kind: Literal["feeding", "walk"] = "walk" if has_walk and not has_feed else "feeding"
-            clock_match = _TIME_RE.search(line)
-            at = _at(line_date, clock_match.group(0)) if clock_match else None
-            activities.append(ParsedActivity(
-                kind=kind,
-                at=at,
-                details=_details_for_activity(line, kind),
-                duration_minutes=_duration_minutes(line) if kind == "walk" else None,
-                source_line=line,
-            ))
 
     # Связываем точечные события. Повторный «уснул» до пробуждения обычно
     # означает исправление времени; сохраняем последнее значение и сообщаем об этом.
@@ -244,7 +196,7 @@ def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
         if key not in seen:
             unique_points.append(event)
             seen.add(key)
-    return ParseResult(sleeps=sleeps, activities=activities, point_events=unique_points, warnings=warnings)
+    return ParseResult(sleeps=sleeps, point_events=unique_points, warnings=warnings)
 
 
 def format_minutes(minutes: int | None) -> str:

@@ -2,7 +2,8 @@ import asyncio
 from datetime import date, datetime
 
 from database import crud
-from database.session import close_db, db_session, init_db
+from database.session import close_db, db_session, init_db, read_sqlite_bytes
+from sqlalchemy import text
 
 
 def test_repeated_initialization_preserves_existing_history(tmp_path):
@@ -18,13 +19,13 @@ def test_repeated_initialization_preserves_existing_history(tmp_path):
             await crud.start_sleep(
                 session, admin.child_id, admin.id, datetime(2025, 3, 20, 10, 0)
             )
-            await crud.add_activity(
-                session,
-                admin.child_id,
-                "feeding",
-                datetime(2025, 3, 20, 9, 30),
-                "грудь",
-                admin.id,
+            await session.execute(text(
+                "CREATE TABLE IF NOT EXISTS legacy_records "
+                "(id INTEGER PRIMARY KEY, child_id INTEGER, payload TEXT)"
+            ))
+            await session.execute(
+                text("INSERT INTO legacy_records (child_id, payload) VALUES (:child_id, :payload)"),
+                {"child_id": admin.child_id, "payload": "старые данные"},
             )
         await close_db()
 
@@ -34,11 +35,12 @@ def test_repeated_initialization_preserves_existing_history(tmp_path):
             admin = await crud.get_user(session, 555001)
             assert admin is not None
             active = await crud.active_sleep(session, admin.child_id)
-            feeding = await crud.latest_activity(session, admin.child_id, "feeding")
             assert active is not None
             assert active.start_time == datetime(2025, 3, 20, 10, 0)
-            assert feeding is not None
-            assert feeding.details == "грудь"
+            legacy_payload = await session.scalar(text("SELECT payload FROM legacy_records LIMIT 1"))
+            assert legacy_payload == "старые данные"
+        backup_payload = await read_sqlite_bytes(database_path)
+        assert backup_payload.startswith(b"SQLite format 3")
         await close_db()
 
     asyncio.run(scenario())

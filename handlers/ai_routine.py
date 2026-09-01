@@ -34,7 +34,6 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
             await message.answer("Сначала выполните /start.")
             return
         logs = await crud.completed_sleeps_since(session, user.child_id, since)
-        activities = await crud.activities_since(session, user.child_id, since)
         birth_date = user.child.birth_date
         timezone_name = user.child.timezone
         today = to_local(utc_now(), timezone_name).date()
@@ -61,7 +60,6 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
             age_months,
             timezone_name,
             logs,
-            activities,
         )
         card = format_analysis_card(analysis, days)
     except Exception:

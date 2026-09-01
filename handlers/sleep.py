@@ -136,7 +136,7 @@ async def do_wake(message: Message, at=None) -> None:
     await message.answer("Таймер бодрствования запущен.", reply_markup=main_keyboard(False), disable_notification=silent)
 
 
-@router.message(F.text == "💤 Уснул")
+@router.message(F.text.in_({"💤 Уснул", "💤 Уснул сейчас"}))
 async def sleep_now(message: Message) -> None:
     await do_sleep_start(message)
 
@@ -193,7 +193,7 @@ async def adjust_time(callback: CallbackQuery, bot: Bot) -> None:
                 await crud.finish_sleep(session, log, log.end_time, user.child.timezone)
         else:
             if new_value <= log.start_time:
-                await callback.answer("Окончание должно быть позже начала", show_alert=True)
+                await callback.message.answer("Окончание должно быть позже начала.")
                 return
             await crud.finish_sleep(session, log, new_value, user.child.timezone)
         child_id, birth, timezone = user.child_id, user.child.birth_date, user.child.timezone

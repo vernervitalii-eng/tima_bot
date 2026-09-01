@@ -6,7 +6,7 @@ from html import escape
 from statistics import mean
 from zoneinfo import ZoneInfo
 
-from database.models import ActivityLog, SleepLog, SleepType
+from database.models import SleepLog, SleepType
 from services.time_utils import format_duration, to_local, utc_now
 
 
@@ -43,28 +43,11 @@ def _progress_bar(duration: timedelta, target_minutes: int) -> str:
     return "▓" * filled + "░" * (10 - filled)
 
 
-def _activity_event(activity: ActivityLog, timezone_name: str) -> TimelineEvent:
-    local = to_local(activity.timestamp, timezone_name)
-    details = escape((activity.details or "").strip())
-    if activity.activity_type == "feeding":
-        suffix = f" • {details.capitalize()}" if details else ""
-        text = f"🍼 <code>{local:%H:%M}</code>  <b>Кормление{suffix}</b>"
-    elif activity.activity_type == "diaper":
-        text = f"🧷 <code>{local:%H:%M}</code>  <b>Подгузник</b>"
-    else:
-        note = details[:180] + ("…" if len(details) > 180 else "")
-        text = f"📝 <code>{local:%H:%M}</code>  <b>Заметка</b>"
-        if note:
-            text += f"\n└ <i>{note}</i>"
-    return TimelineEvent(local, 0, text)
-
-
 def build_day_timeline(
     child_name: str,
     selected_date: date,
     timezone_name: str,
     logs: list[SleepLog],
-    activities: list[ActivityLog],
     wake_target_minutes: int,
     now: datetime | None = None,
 ) -> str:
@@ -72,7 +55,7 @@ def build_day_timeline(
     start_utc, end_utc = local_date_bounds_utc(selected_date, timezone_name)
     today = to_local(now, timezone_name).date()
     effective_end = min(end_utc, now) if selected_date == today else end_utc
-    events: list[TimelineEvent] = [_activity_event(item, timezone_name) for item in activities]
+    events: list[TimelineEvent] = []
     total_sleep = timedelta()
     day_sleep = timedelta()
     day_count = 0
@@ -173,15 +156,15 @@ def build_day_timeline(
     )
     summary = (
         "────────────────────\n"
-        "📊 <b>СВОДКА ЗА СУТКИ</b>\n"
+        "📊 <b>ИТОГО</b>\n"
         f"• 💤 Дневной сон: <code>{format_duration(day_sleep)}</code> ({day_count} снов)\n"
         f"• ⏱ Среднее ВБ: <code>{format_duration(average_wake)}</code>\n"
-        f"• 🔋 Общий сон: <code>{format_duration(total_sleep)}</code>\n"
+        f"• 🔋 Всего сна за сутки: <code>{format_duration(total_sleep)}</code>\n"
         "━━━━━━━━━━━━━━━━━━━━"
     )
     return (
         "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👶 <b>РЕЖИМ ДНЯ • {_date_title(selected_date)}</b>\n"
+        f"👶 <b>ХРОНОЛОГИЯ • {_date_title(selected_date)}</b>\n"
         f"<code>{escape(child_name)}</code>\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         + "\n\n".join(blocks)

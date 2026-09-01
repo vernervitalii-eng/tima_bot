@@ -5,7 +5,8 @@ from __future__ import annotations
 from collections.abc import Iterable
 from datetime import date, datetime, time, timedelta
 from io import BytesIO
-from zoneinfo import ZoneInfo
+import os
+import tempfile
 
 from services.time_utils import local_to_utc, to_local, utc_now
 
@@ -42,6 +43,7 @@ def generate_sleep_chart(
 ) -> BytesIO:
     """Создаёт PNG со stacked-барами ночного и дневного сна."""
     try:
+        os.environ.setdefault("MPLCONFIGDIR", os.path.join(tempfile.gettempdir(), "tima-matplotlib"))
         import matplotlib
         matplotlib.use("Agg")
         import matplotlib.pyplot as plt

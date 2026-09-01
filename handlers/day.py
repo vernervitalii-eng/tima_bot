@@ -30,7 +30,6 @@ async def _load_day(telegram_id: int, selected_date: date) -> tuple[str, bool, d
         since, until = local_date_bounds_utc(selected_date, user.child.timezone)
         query_until = min(until, now) if selected_date == today else until
         logs = await crud.sleeps_overlapping(session, user.child_id, since, query_until)
-        activities = await crud.activities_between(session, user.child_id, since, query_until)
         months, _ = age_parts(user.child.birth_date, selected_date)
         norm = norm_for_age(months)
         wake_target = round((norm.wake_min + norm.wake_max) / 2)
@@ -39,7 +38,6 @@ async def _load_day(telegram_id: int, selected_date: date) -> tuple[str, bool, d
             selected_date,
             user.child.timezone,
             logs,
-            activities,
             wake_target,
             now,
         )

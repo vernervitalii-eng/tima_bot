@@ -23,7 +23,7 @@ async def parse_natural_message(message: Message) -> None:
         parsed = parse_text(message.text, to_local(utc_now(), user.child.timezone).date())
 
     # Одиночные короткие фразы используют привычную live-логику уведомлений.
-    if len(parsed.point_events) == 1 and not parsed.activities:
+    if len(parsed.point_events) == 1:
         kind, at, _ = parsed.point_events[0]
         if kind == "sleep_start" and len(parsed.sleeps) == 1 and parsed.sleeps[0].end is None:
             await do_sleep_start(message, local_to_utc(at, user.child.timezone))
@@ -32,8 +32,11 @@ async def parse_natural_message(message: Message) -> None:
             await do_wake(message, local_to_utc(at, user.child.timezone))
             return
 
-    if not parsed.sleeps and not parsed.activities:
-        await message.answer("Не нашёл события. Пример: «04.08 10:15-11:30 спал» или «поел смесь 150мл в 12:00».")
+    if not parsed.sleeps:
+        await message.answer(
+            "Не нашёл событие сна. Примеры: «04.08 10:15-11:30 спал», "
+            "«уснул в 21:00», «проснулся в 07:30»."
+        )
         return
 
     sleeps = [
@@ -47,29 +50,17 @@ async def parse_natural_message(message: Message) -> None:
         )
         for item in parsed.sleeps
     ]
-    activities = [
-        item.__class__(
-            kind=item.kind,
-            at=local_to_utc(item.at, user.child.timezone) if item.at else None,
-            details=item.details,
-            duration_minutes=item.duration_minutes,
-            source_line=item.source_line,
-        )
-        for item in parsed.activities
-    ]
     async with db_session() as session:
         current = await crud.get_user(session, message.from_user.id)
         if not current:
             await message.answer("Сначала выполните /start.")
             return
-        stats = await crud.seed_monthly_data(session, current.child_id, current.id, sleeps, activities)
+        stats = await crud.seed_monthly_data(session, current.child_id, current.id, sleeps)
 
     warning = f"\n⚠️ Предупреждений парсера: {len(parsed.warnings)}" if parsed.warnings else ""
     await message.answer(
         "✅ События распознаны и сохранены.\n"
         f"💤 Снов добавлено: {stats['sleep_added']}\n"
-        f"🍼 Активностей добавлено: {stats['activity_added']}\n"
-        f"↩️ Дубликатов пропущено: {stats['sleep_skipped'] + stats['activity_skipped']}"
+        f"↩️ Дубликатов пропущено: {stats['sleep_skipped']}"
         + warning
     )
-

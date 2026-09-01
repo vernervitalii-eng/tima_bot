@@ -6,13 +6,13 @@ from html import escape
 
 from pydantic import BaseModel, Field
 
-from database.models import ActivityLog, SleepLog
+from database.models import SleepLog
 from services.time_utils import to_local
 
 
 class ScheduleItem(BaseModel):
     time: str = Field(description="Время или диапазон времени в формате ЧЧ:ММ")
-    activity: str = Field(description="Короткое название события режима")
+    event: str = Field(description="Короткое название события сна или бодрствования")
 
 
 class RoutineAnalysis(BaseModel):
@@ -31,7 +31,10 @@ def build_sleep_history(logs: list[SleepLog], timezone_name: str) -> list[dict[s
         local_end = to_local(log.end_time, timezone_name)
         wake_before = None
         if previous_end and log.start_time > previous_end:
-            wake_before = int((log.start_time - previous_end).total_seconds() // 60)
+            candidate = int((log.start_time - previous_end).total_seconds() // 60)
+            # Большой разрыв обычно означает неполные записи, а не реальное ВБ.
+            if 20 <= candidate <= 12 * 60:
+                wake_before = candidate
         history.append({
             "date": local_start.date().isoformat(),
             "sleep_start": local_start.strftime("%H:%M"),
@@ -44,42 +47,27 @@ def build_sleep_history(logs: list[SleepLog], timezone_name: str) -> list[dict[s
     return history
 
 
-def build_activity_history(logs: list[ActivityLog], timezone_name: str) -> list[dict[str, object]]:
-    return [
-        {
-            "date": to_local(item.timestamp, timezone_name).date().isoformat(),
-            "time": to_local(item.timestamp, timezone_name).strftime("%H:%M"),
-            "type": item.activity_type,
-            "details": (item.details or "")[:300],
-        }
-        for item in sorted(logs, key=lambda item: item.timestamp)
-    ]
-
-
 async def analyze_routine(
     api_key: str,
     model_name: str,
     age_months: int,
     timezone_name: str,
     logs: list[SleepLog],
-    activities: list[ActivityLog] | None = None,
 ) -> tuple[RoutineAnalysis, int]:
     from google import genai
 
     history = build_sleep_history(logs, timezone_name)
-    activity_history = build_activity_history(activities or [], timezone_name)
     observed_days = len({item["date"] for item in history})
     payload = {
         "age_months": age_months,
         "observed_days": observed_days,
         "sleep_history": history,
-        "activity_history": activity_history,
     }
     prompt = (
         "Ты аналитик детского сна. Проанализируй только переданные наблюдения за месяц: найди устойчивые "
         "временные окна сна, различия окон бодрствования до обеда и перед ночью, признаки "
         "систематического недосыпа, перегула или слишком короткого бодрствования. Учитывай ночные "
-        "подъёмы, кормления и прогулки, если они переданы. Определи окна первого/второго сна и ночного "
+        "подъёмы и регулярность переходов между сном и бодрствованием. Определи окна первого/второго сна и ночного "
         "укладывания. Составь реалистичный стабильный почасовой график. Не выдумывай корреляции, "
         "которых недостаточно в данных, не ставь диагнозов "
         "и не заменяй рекомендации педиатра. Дай 3–4 точечных совета. Пиши по-русски, кратко и конкретно.\n\n"
@@ -106,7 +94,7 @@ def format_analysis_card(analysis: RoutineAnalysis, observed_days: int) -> str:
     visible_schedule = analysis.schedule[:7]
     for index, item in enumerate(visible_schedule):
         branch = "└" if index == len(visible_schedule) - 1 else "├"
-        schedule_lines.append(f"{branch} <code>{escape(item.time[:40])}</code> — {escape(item.activity[:140])}")
+        schedule_lines.append(f"{branch} <code>{escape(item.time[:40])}</code> — {escape(item.event[:140])}")
     tips = "\n".join(
         f"{index}. {escape(item[:280])}" for index, item in enumerate(analysis.tips[:4], start=1)
     )

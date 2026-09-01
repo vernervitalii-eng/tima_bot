@@ -21,16 +21,6 @@ def edit_time_keyboard(log_id: int, field: str) -> InlineKeyboardMarkup:
     ])
 
 
-def activity_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🍼 Грудь", callback_data="activity:feeding:грудь"),
-         InlineKeyboardButton(text="🍼 Смесь", callback_data="activity:feeding:смесь")],
-        [InlineKeyboardButton(text="🥣 Прикорм", callback_data="activity:feeding:прикорм")],
-        [InlineKeyboardButton(text="💩 Подгузник", callback_data="activity:diaper:подгузник")],
-        [InlineKeyboardButton(text="💊 Лекарство / Зубы", callback_data="activity:notes:ask")],
-    ])
-
-
 def join_role_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="Мама", callback_data="join-role:Мама"),
@@ -111,9 +101,9 @@ def day_navigation_keyboard(selected: date, today: date) -> InlineKeyboardMarkup
     previous = selected - timedelta(days=1)
     next_day = selected + timedelta(days=1)
     rows = [[
-        InlineKeyboardButton(text="◀️ Пред. день", callback_data=f"day:nav:{previous:%Y-%m-%d}"),
+        InlineKeyboardButton(text="◀️ Вчера", callback_data=f"day:nav:{previous:%Y-%m-%d}"),
         InlineKeyboardButton(text="📅 Выбрать дату", callback_data="day:pick"),
-        InlineKeyboardButton(text="След. день ▶️", callback_data=f"day:nav:{next_day:%Y-%m-%d}")
+        InlineKeyboardButton(text="Завтра ▶️", callback_data=f"day:nav:{next_day:%Y-%m-%d}")
         if next_day <= today else InlineKeyboardButton(text="Сегодня", callback_data="day:today"),
     ]]
     return InlineKeyboardMarkup(inline_keyboard=rows)
@@ -122,4 +112,31 @@ def day_navigation_keyboard(selected: date, today: date) -> InlineKeyboardMarkup
 def ai_refresh_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="🔄 Обновить анализ", callback_data="ai:refresh")],
+    ])
+
+
+def history_keyboard(log_ids: list[int], page: int, total_pages: int) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(
+            text=f"🗑 Удалить запись №{index}",
+            callback_data=f"history:delete:{log_id}:{page}",
+        )]
+        for index, log_id in enumerate(log_ids, start=1)
+    ]
+    navigation: list[InlineKeyboardButton] = []
+    if page > 0:
+        navigation.append(InlineKeyboardButton(text="◀️ Назад", callback_data=f"history:page:{page - 1}"))
+    if page + 1 < total_pages:
+        navigation.append(InlineKeyboardButton(text="Вперёд ▶️", callback_data=f"history:page:{page + 1}"))
+    if navigation:
+        rows.append(navigation)
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def history_delete_confirmation_keyboard(log_id: int, page: int) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="✅ Да, удалить", callback_data=f"history:confirm:{log_id}:{page}"),
+            InlineKeyboardButton(text="↩️ Отмена", callback_data=f"history:cancel:{page}"),
+        ]
     ])
