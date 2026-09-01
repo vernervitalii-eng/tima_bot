@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from datetime import datetime
 from html import escape
@@ -20,6 +21,18 @@ class RoutineAnalysis(BaseModel):
     schedule: list[ScheduleItem] = Field(min_length=3, max_length=8)
     tips: list[str] = Field(min_length=2, max_length=5)
     caveat: str = Field(description="Короткое предупреждение об ограниченности данных")
+
+
+def _is_retryable_gemini_error(exc: Exception) -> bool:
+    """Распознаёт временные ошибки Gemini, для которых безопасен повтор запроса."""
+    raw_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
+    try:
+        code = int(raw_code)
+    except (TypeError, ValueError):
+        code = None
+    return code in {429, 500, 502, 503, 504} or str(exc).lstrip().startswith(
+        ("429", "500", "502", "503", "504")
+    )
 
 
 def build_sleep_history(logs: list[SleepLog], timezone_name: str) -> list[dict[str, object]]:
@@ -73,19 +86,37 @@ async def analyze_routine(
         "и не заменяй рекомендации педиатра. Дай 3–4 точечных совета. Пиши по-русски, кратко и конкретно.\n\n"
         f"Данные наблюдений:\n{json.dumps(payload, ensure_ascii=False, separators=(',', ':'))}"
     )
-    async with genai.Client(api_key=api_key).aio as client:
-        response = await client.models.generate_content(
-            model=model_name,
-            contents=prompt,
-            config={
-                "max_output_tokens": 1400,
-                "response_mime_type": "application/json",
-                "response_json_schema": RoutineAnalysis.model_json_schema(),
-            },
-        )
-    if not response.text:
-        raise RuntimeError("Gemini вернул пустой ответ")
-    return RoutineAnalysis.model_validate_json(response.text), observed_days
+    request_config = {
+        "max_output_tokens": 1400,
+        "response_mime_type": "application/json",
+        "response_json_schema": RoutineAnalysis.model_json_schema(),
+    }
+    # SDK уже повторяет часть временных ошибок. Дополнительно делаем один
+    # прикладной повтор и, если основной endpoint перегружен, переключаемся на
+    # предыдущую стабильную Flash-модель с тем же форматом ответа.
+    candidate_models = list(dict.fromkeys((model_name, "gemini-3.6-flash")))
+    last_error: Exception | None = None
+    for model_index, candidate_model in enumerate(candidate_models):
+        attempts = 2 if model_index == 0 else 1
+        for attempt in range(attempts):
+            try:
+                async with genai.Client(api_key=api_key).aio as client:
+                    response = await client.models.generate_content(
+                        model=candidate_model,
+                        contents=prompt,
+                        config=request_config,
+                    )
+                if not response.text:
+                    raise RuntimeError("Gemini вернул пустой ответ")
+                return RoutineAnalysis.model_validate_json(response.text), observed_days
+            except Exception as exc:
+                if not _is_retryable_gemini_error(exc):
+                    raise
+                last_error = exc
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+
+    raise RuntimeError("Gemini временно перегружен после повторных попыток") from last_error
 
 
 def format_analysis_card(analysis: RoutineAnalysis, observed_days: int) -> str:
