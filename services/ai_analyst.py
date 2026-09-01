@@ -27,6 +27,37 @@ class RoutineAnalysis(BaseModel):
     caveat: str = Field(description="Короткое предупреждение об ограниченности данных")
 
 
+class ConsultantAnswer(BaseModel):
+    answer: str = Field(description="Прямой краткий ответ родителю с опорой на цифры")
+    key_facts: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description="Факты из истории, которые объясняют рекомендацию",
+    )
+    updated_schedule: list[ScheduleItem] = Field(
+        default_factory=list,
+        max_length=8,
+        description=(
+            "Полный обновлённый график из 3–8 точных временных слотов, если родитель "
+            "просит изменить время, число снов или перестроить день"
+        ),
+    )
+    actions: list[str] = Field(
+        default_factory=list,
+        max_length=4,
+        description="Практические следующие шаги для родителя",
+    )
+    caveat: str = Field(description="Краткое ограничение рекомендации")
+
+
+class ConsultantScheduleAnswer(ConsultantAnswer):
+    updated_schedule: list[ScheduleItem] = Field(
+        min_length=3,
+        max_length=8,
+        description="Обязательный полный пересчитанный график из 3–8 точных временных слотов",
+    )
+
+
 def _is_retryable_gemini_error(exc: Exception) -> bool:
     """Распознаёт временные ошибки Gemini, для которых безопасен повтор запроса."""
     raw_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
@@ -197,6 +228,47 @@ def build_consultation_context(
     }
 
 
+def consultation_requires_schedule(question: str) -> bool:
+    normalized = question.lower().replace("ё", "е")
+    markers = (
+        "давай",
+        "смест",
+        "пересч",
+        "перестро",
+        "не подходит",
+        "неудоб",
+        "один сон",
+        "два сна",
+        "переходим",
+        "поменя",
+        "скоррект",
+    )
+    return any(marker in normalized for marker in markers)
+
+
+def consultant_answer_to_text(answer: ConsultantAnswer) -> str:
+    parts = [answer.answer.strip()]
+    if answer.key_facts:
+        parts.append("ФАКТЫ ИЗ ИСТОРИИ")
+        parts.extend(f"• {item.strip()}" for item in answer.key_facts if item.strip())
+    if answer.updated_schedule:
+        parts.append("ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК")
+        parts.extend(
+            f"{item.time.strip()} — {item.event.strip()}"
+            for item in answer.updated_schedule
+        )
+    if answer.actions:
+        parts.append("ЧТО ДЕЛАТЬ СЕЙЧАС")
+        parts.extend(
+            f"{index}. {item.strip()}"
+            for index, item in enumerate(answer.actions, start=1)
+            if item.strip()
+        )
+    if answer.caveat.strip():
+        parts.append(f"Важно: {answer.caveat.strip()}")
+    return "\n".join(part for part in parts if part)
+
+
 async def ask_sleep_consultant(
     api_key: str,
     model_name: str,
@@ -230,17 +302,36 @@ async def ask_sleep_consultant(
         "НОВЫЙ ВОПРОС ИЛИ ЗАМЕЧАНИЕ РОДИТЕЛЯ:\n"
         f"{question.strip()[:2000]}"
     )
+    requires_schedule = consultation_requires_schedule(question)
+    response_model = ConsultantScheduleAnswer if requires_schedule else ConsultantAnswer
+    request_config = {
+        "system_instruction": system_instruction,
+        "max_output_tokens": 1800,
+        "temperature": 0.3,
+        "response_mime_type": "application/json",
+        "response_json_schema": response_model.model_json_schema(),
+    }
     response = await _generate_with_fallback(
         api_key,
         model_name,
         prompt,
-        {
-            "system_instruction": system_instruction,
-            "max_output_tokens": 1600,
-            "temperature": 0.35,
-        },
+        request_config,
     )
-    return response.text.strip()
+    parsed = response_model.model_validate_json(response.text)
+    if requires_schedule and len(parsed.updated_schedule) < 3:
+        correction_prompt = (
+            f"{prompt}\n\n"
+            "КРИТИЧЕСКОЕ ТРЕБОВАНИЕ: это запрос на изменение режима. Поле updated_schedule "
+            "обязательно должно содержать полный пересчитанный график минимум из трёх точных слотов."
+        )
+        response = await _generate_with_fallback(
+            api_key,
+            model_name,
+            correction_prompt,
+            request_config,
+        )
+        parsed = response_model.model_validate_json(response.text)
+    return consultant_answer_to_text(parsed)
 
 
 def format_consultant_answer(answer: str) -> str:

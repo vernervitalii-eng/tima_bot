@@ -21,6 +21,7 @@ from services.ai_analyst import (
     build_sleep_history,
     format_analysis_card,
     format_consultant_answer,
+    consultation_requires_schedule,
     trim_dialog_history,
 )
 from services.day_timeline import build_day_timeline, local_date_bounds_utc
@@ -190,7 +191,14 @@ def test_ai_consultant_prompt_contains_parent_correction(monkeypatch):
     captured = {}
 
     class Response:
-        text = "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК\n11:00 — первый сон"
+        text = (
+            '{"answer":"Сдвигаем первый сон.","key_facts":["Окно ВБ позволяет сдвиг"],'
+            '"updated_schedule":['
+            '{"time":"07:00","event":"Подъём"},'
+            '{"time":"11:00–12:15","event":"Первый сон"},'
+            '{"time":"20:30","event":"Ночной сон"}],'
+            '"actions":["Начать ритуал в 10:40"],"caveat":"Наблюдайте три дня"}'
+        )
 
     async def fake_generate(api_key, model_name, contents, config):
         captured.update(contents=contents, config=config)
@@ -210,7 +218,10 @@ def test_ai_consultant_prompt_contains_parent_correction(monkeypatch):
     assert "давай первый сон в 11:00" in captured["contents"]
     assert "last_base_routine" in captured["contents"]
     assert "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК" in captured["config"]["system_instruction"]
-    assert result.startswith("ОБНОВЛЁННЫЙ")
+    assert "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК" in result
+    assert "11:00–12:15" in result
+    assert consultation_requires_schedule("Мы переходим на один сон")
+    assert not consultation_requires_schedule("Почему он долго засыпает?")
 
 
 def test_ai_dialog_router_precedes_standard_text_handlers():
