@@ -9,6 +9,7 @@ from keyboards.main import main_keyboard
 from services.ai_analyst import RoutineAnalysis, ScheduleItem, build_sleep_history, format_analysis_card
 from services.day_timeline import build_day_timeline, local_date_bounds_utc
 from services.sleep_insights import build_wake_widget, typical_wake_minutes
+from services.live_status import build_live_status_card
 
 
 def sleep(start: datetime, end: datetime, sleep_type: str = SleepType.DAY.value) -> SleepLog:
@@ -92,11 +93,44 @@ def test_ai_history_and_new_keyboards():
     assert ai_refresh_keyboard().inline_keyboard[0][0].callback_data == "ai:refresh"
 
     labels = [button.text for row in main_keyboard(False).keyboard for button in row]
+    assert labels[0] == "💤 Уснул"
+    assert "☀️ Проснулся" not in labels
     assert "📅 Хронология дня" in labels
-    assert "📋 История записей" in labels
-    assert "🧠 AI-Режим (Gemini)" in labels
+    assert "🧠 AI-Режим" in labels
     assert "📊 График снов" in labels
+    sleeping_labels = [button.text for row in main_keyboard(True).keyboard for button in row]
+    assert sleeping_labels[0] == "☀️ Проснулся"
+    assert "💤 Уснул" not in sleeping_labels
     assert history_keyboard([1], 0, 1).inline_keyboard[0][0].callback_data == "history:delete:1:0"
+
+
+def test_live_status_card_for_sleep_and_wake():
+    active = sleep(datetime(2025, 3, 20, 10), datetime(2025, 3, 20, 11))
+    active.end_time = None
+    sleeping = build_live_status_card(
+        "Тима",
+        "UTC",
+        datetime(2025, 3, 20, 11, 15),
+        active,
+        None,
+        180,
+    )
+    assert "СТАТУС: РЕБЁНОК СПИТ" in sleeping
+    assert "10:00" in sleeping
+    assert "1 ч 15 мин" in sleeping
+
+    completed = sleep(datetime(2025, 3, 20, 10), datetime(2025, 3, 20, 11))
+    awake = build_live_status_card(
+        "Тима",
+        "UTC",
+        datetime(2025, 3, 20, 12, 30),
+        None,
+        completed,
+        180,
+    )
+    assert "СТАТУС: РЕБЁНОК БОДРСТВУЕТ" in awake
+    assert "Проснулся в: <code>11:00</code>" in awake
+    assert "~14:00" in awake
 
 
 def test_ai_card_is_html_safe_and_fits_telegram_limit():

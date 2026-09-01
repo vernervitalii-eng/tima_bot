@@ -12,7 +12,8 @@ from database.session import db_session
 from handlers.states import EditTime
 from keyboards.inline import edit_time_keyboard
 from keyboards.main import main_keyboard
-from services.scheduler import notify_family, schedule_after_sleep, schedule_after_wake
+from services.scheduler import schedule_after_sleep, schedule_after_wake
+from services.live_status import broadcast_live_status
 from services.norms import norm_for_age
 from services.sleep_insights import build_wake_widget, typical_wake_minutes
 from services.time_utils import age_parts, format_duration, is_quiet_hours, parse_relative_time, to_local, utc_now
@@ -70,7 +71,7 @@ async def do_sleep_start(message: Message, at=None) -> None:
             )
         except Exception:
             pass
-    await message.answer("Таймер сна запущен.", reply_markup=main_keyboard(True), disable_notification=silent)
+    await broadcast_live_status(message.bot, child_id)
 
 
 async def do_wake(message: Message, at=None) -> None:
@@ -133,7 +134,7 @@ async def do_wake(message: Message, at=None) -> None:
             )
         except Exception:
             pass
-    await message.answer("Таймер бодрствования запущен.", reply_markup=main_keyboard(False), disable_notification=silent)
+    await broadcast_live_status(message.bot, child_id)
 
 
 @router.message(F.text.in_({"💤 Уснул", "💤 Уснул сейчас"}))

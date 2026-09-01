@@ -74,6 +74,7 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
 
 @router.message(Command("ai_routine"))
 @router.message(F.text == "🧠 AI-анализ")
+@router.message(F.text == "🧠 AI-Режим")
 @router.message(F.text == "🧠 AI-Режим (Gemini)")
 async def ai_routine(message: Message, settings: Settings) -> None:
     await _run_analysis(message, message.from_user.id, settings)

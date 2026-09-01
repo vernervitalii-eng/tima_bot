@@ -182,6 +182,22 @@ async def completed_sleeps_since(
     return list(rows)
 
 
+async def sleep_status_snapshot(
+    session: AsyncSession,
+    child_id: int,
+    since: datetime,
+) -> tuple[SleepLog | None, SleepLog | None, list[SleepLog]]:
+    """Возвращает согласованный снимок статуса из существующей истории сна.
+
+    Статус не дублируется в отдельной таблице: активный сон и последнее
+    пробуждение остаются единственным источником истины для всех родителей.
+    """
+    active = await active_sleep(session, child_id)
+    last_completed = await last_completed_sleep(session, child_id)
+    history = await completed_sleeps_since(session, child_id, since)
+    return active, last_completed, history
+
+
 async def family_telegram_ids(session: AsyncSession, child_id: int) -> list[int]:
     return list(await session.scalars(select(User.telegram_id).where(User.child_id == child_id)))
 

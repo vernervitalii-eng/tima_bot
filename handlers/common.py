@@ -11,6 +11,7 @@ from database.session import db_session
 from handlers.states import Onboarding
 from keyboards.main import main_keyboard
 from keyboards.inline import start_choice_keyboard
+from services.live_status import build_live_status_view
 from services.time_utils import age_parts, parse_birth_date
 
 router = Router(name="common")
@@ -22,11 +23,12 @@ async def start(message: Message, state: FSMContext) -> None:
     async with db_session() as session:
         user = await crud.get_user(session, message.from_user.id)
         if user:
-            sleeping = await crud.active_sleep(session, user.child_id) is not None
             months, days = age_parts(user.child.birth_date)
+            view = await build_live_status_view(session, user.child)
             await message.answer(
-                f"С возвращением! {user.child.name}: {months} мес. {days} дн.",
-                reply_markup=main_keyboard(sleeping),
+                f"С возвращением! {user.child.name}: {months} мес. {days} дн.\n\n{view.text}",
+                reply_markup=main_keyboard(view.is_sleeping),
+                disable_notification=view.silent,
             )
             return
     await message.answer(
