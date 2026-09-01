@@ -8,6 +8,7 @@ def main_keyboard(is_sleeping: bool) -> ReplyKeyboardMarkup:
             [KeyboardButton(text=primary_action)],
             [KeyboardButton(text="📅 Хронология дня")],
             [KeyboardButton(text="🧠 AI-Режим"), KeyboardButton(text="📊 График снов")],
+            [KeyboardButton(text="💬 Чат с ИИ-консультантом")],
         ],
         resize_keyboard=True,
         input_field_placeholder="Выберите действие",

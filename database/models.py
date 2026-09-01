@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import date, datetime, timezone
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -75,3 +75,18 @@ class SleepLog(Base):
     ended_by_user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
 
     child: Mapped[Child] = relationship(back_populates="sleeps")
+
+
+class AIRoutineSnapshot(Base):
+    """Последний базовый AI-режим, общий для всех родителей ребёнка."""
+
+    __tablename__ = "ai_routine_snapshots"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    child_id: Mapped[int] = mapped_column(
+        ForeignKey("children.id", ondelete="CASCADE"),
+        unique=True,
+        index=True,
+    )
+    payload_json: Mapped[str] = mapped_column(Text)
+    generated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)

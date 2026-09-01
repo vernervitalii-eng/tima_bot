@@ -2,13 +2,17 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
 from html import escape
+from statistics import mean
 
 from pydantic import BaseModel, Field
 
 from database.models import SleepLog
-from services.time_utils import to_local
+from services.time_utils import to_local, utc_now
+
+
+_BASE_ROUTINE_CACHE: dict[int, str] = {}
 
 
 class ScheduleItem(BaseModel):
@@ -33,6 +37,40 @@ def _is_retryable_gemini_error(exc: Exception) -> bool:
     return code in {429, 500, 502, 503, 504} or str(exc).lstrip().startswith(
         ("429", "500", "502", "503", "504")
     )
+
+
+async def _generate_with_fallback(
+    api_key: str,
+    model_name: str,
+    contents,
+    config: dict[str, object],
+):
+    """Единая политика повторов для анализа режима и диалога."""
+    from google import genai
+
+    candidate_models = list(dict.fromkeys((model_name, "gemini-3.6-flash")))
+    last_error: Exception | None = None
+    for model_index, candidate_model in enumerate(candidate_models):
+        attempts = 2 if model_index == 0 else 1
+        for attempt in range(attempts):
+            try:
+                async with genai.Client(api_key=api_key).aio as client:
+                    response = await client.models.generate_content(
+                        model=candidate_model,
+                        contents=contents,
+                        config=config,
+                    )
+                if not response.text:
+                    raise RuntimeError("Gemini вернул пустой ответ")
+                return response
+            except Exception as exc:
+                if not _is_retryable_gemini_error(exc):
+                    raise
+                last_error = exc
+                if attempt + 1 < attempts:
+                    await asyncio.sleep(1.5 * (attempt + 1))
+
+    raise RuntimeError("Gemini временно перегружен после повторных попыток") from last_error
 
 
 def build_sleep_history(logs: list[SleepLog], timezone_name: str) -> list[dict[str, object]]:
@@ -60,6 +98,172 @@ def build_sleep_history(logs: list[SleepLog], timezone_name: str) -> list[dict[s
     return history
 
 
+def serialize_base_routine(analysis: RoutineAnalysis) -> str:
+    return json.dumps(
+        analysis.model_dump(mode="json"),
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+
+
+def remember_base_routine(child_id: int, analysis: RoutineAnalysis) -> str:
+    """Кэширует режим и возвращает JSON для постоянного безопасного снимка."""
+    payload = serialize_base_routine(analysis)
+    _BASE_ROUTINE_CACHE[child_id] = payload
+    return payload
+
+
+def get_last_base_routine(child_id: int) -> str | None:
+    return _BASE_ROUTINE_CACHE.get(child_id)
+
+
+def trim_dialog_history(
+    history: list[dict[str, str]] | None,
+    max_exchanges: int = 6,
+) -> list[dict[str, str]]:
+    """Оставляет не более шести последних пар пользователь/консультант."""
+    cleaned: list[dict[str, str]] = []
+    for item in history or []:
+        role = str(item.get("role", "")).strip().lower()
+        text = str(item.get("text", "")).strip()
+        if role not in {"user", "assistant"} or not text:
+            continue
+        cleaned.append({"role": role, "text": text[:3500]})
+    return cleaned[-max(max_exchanges, 1) * 2:]
+
+
+def build_consultation_context(
+    logs: list[SleepLog],
+    timezone_name: str,
+    age_months: int,
+    dialog_history: list[dict[str, str]] | None,
+    base_routine: str | None,
+    now: datetime | None = None,
+) -> dict[str, object]:
+    """Строит обезличенный фактический контекст для консультации Gemini."""
+    current = now or utc_now()
+    history = build_sleep_history(logs, timezone_name)
+    local_today = to_local(current, timezone_name).date()
+    cutoff = (local_today - timedelta(days=13)).isoformat()
+    recent = [item for item in history if str(item["date"]) >= cutoff]
+    wake_samples = [
+        int(item["wake_before_minutes"])
+        for item in history
+        if item["wake_before_minutes"] is not None
+    ]
+    day_durations = [
+        int(item["duration_minutes"])
+        for item in history
+        if item["sleep_type"] == "day"
+    ]
+    night_durations = [
+        int(item["duration_minutes"])
+        for item in history
+        if item["sleep_type"] == "night"
+    ]
+    active = next((item for item in reversed(logs) if item.end_time is None), None)
+    if active is not None:
+        current_status: dict[str, object] = {
+            "state": "sleeping",
+            "since": to_local(active.start_time, timezone_name).strftime("%Y-%m-%d %H:%M"),
+            "elapsed_minutes": max(int((current - active.start_time).total_seconds() // 60), 0),
+        }
+    elif history:
+        current_status = {
+            "state": "awake",
+            "since": f"{history[-1]['date']} {history[-1]['sleep_end']}",
+        }
+    else:
+        current_status = {"state": "unknown"}
+
+    def average(values: list[int]) -> int | None:
+        return round(mean(values)) if values else None
+
+    return {
+        "child_age_months": age_months,
+        "timezone": timezone_name,
+        "current_status": current_status,
+        "month_summary": {
+            "observed_days": len({item["date"] for item in history}),
+            "completed_sleeps": len(history),
+            "average_wake_minutes": average(wake_samples),
+            "average_day_sleep_minutes": average(day_durations),
+            "average_night_sleep_minutes": average(night_durations),
+        },
+        "sleep_history_month": history,
+        "sleep_history_last_14_days": recent,
+        "last_base_routine": base_routine or "Базовый AI-режим ещё не создавался; рассчитай его по истории.",
+        "dialog_history": trim_dialog_history(dialog_history),
+    }
+
+
+async def ask_sleep_consultant(
+    api_key: str,
+    model_name: str,
+    age_months: int,
+    timezone_name: str,
+    logs: list[SleepLog],
+    question: str,
+    dialog_history: list[dict[str, str]] | None = None,
+    base_routine: str | None = None,
+) -> str:
+    """Отвечает на вопрос родителя с опорой на историю и текущий диалог."""
+    context = build_consultation_context(
+        logs,
+        timezone_name,
+        age_months,
+        dialog_history,
+        base_routine,
+    )
+    system_instruction = (
+        "Ты профессиональный консультант по детскому сну. Отвечай по-русски, спокойно и конкретно. "
+        "Опирайся только на цифры и события из переданного контекста и явно отделяй факты от предположений. "
+        "Не ставь медицинских диагнозов и при тревожных симптомах советуй обратиться к педиатру. "
+        "Учитывай пожелания родителя как новые ограничения. Если пользователь просит сдвинуть сон, перейти "
+        "на другое число снов или сообщает новое обстоятельство, пересчитай весь оставшийся день и выдай блок "
+        "«ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК» с точными временными слотами. Объясни 2–4 ключевые причины и "
+        "предложи практический следующий шаг. Не используй Markdown или HTML — только аккуратный обычный текст."
+    )
+    prompt = (
+        "КОНТЕКСТ РЕЖИМА:\n"
+        f"{json.dumps(context, ensure_ascii=False, separators=(',', ':'))}\n\n"
+        "НОВЫЙ ВОПРОС ИЛИ ЗАМЕЧАНИЕ РОДИТЕЛЯ:\n"
+        f"{question.strip()[:2000]}"
+    )
+    response = await _generate_with_fallback(
+        api_key,
+        model_name,
+        prompt,
+        {
+            "system_instruction": system_instruction,
+            "max_output_tokens": 1600,
+            "temperature": 0.35,
+        },
+    )
+    return response.text.strip()
+
+
+def format_consultant_answer(answer: str) -> str:
+    escaped_parts: list[str] = []
+    escaped_length = 0
+    for character in answer.strip():
+        escaped_character = escape(character)
+        if escaped_length + len(escaped_character) > 3400:
+            escaped_parts.append("…")
+            break
+        escaped_parts.append(escaped_character)
+        escaped_length += len(escaped_character)
+    safe = "".join(escaped_parts)
+    return (
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 <b>ОТВЕТ ИИ-КОНСУЛЬТАНТА</b>\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        f"{safe}\n"
+        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<i>Рекомендации справочные и не заменяют консультацию педиатра.</i>"
+    )
+
+
 async def analyze_routine(
     api_key: str,
     model_name: str,
@@ -67,8 +271,6 @@ async def analyze_routine(
     timezone_name: str,
     logs: list[SleepLog],
 ) -> tuple[RoutineAnalysis, int]:
-    from google import genai
-
     history = build_sleep_history(logs, timezone_name)
     observed_days = len({item["date"] for item in history})
     payload = {
@@ -91,32 +293,8 @@ async def analyze_routine(
         "response_mime_type": "application/json",
         "response_json_schema": RoutineAnalysis.model_json_schema(),
     }
-    # SDK уже повторяет часть временных ошибок. Дополнительно делаем один
-    # прикладной повтор и, если основной endpoint перегружен, переключаемся на
-    # предыдущую стабильную Flash-модель с тем же форматом ответа.
-    candidate_models = list(dict.fromkeys((model_name, "gemini-3.6-flash")))
-    last_error: Exception | None = None
-    for model_index, candidate_model in enumerate(candidate_models):
-        attempts = 2 if model_index == 0 else 1
-        for attempt in range(attempts):
-            try:
-                async with genai.Client(api_key=api_key).aio as client:
-                    response = await client.models.generate_content(
-                        model=candidate_model,
-                        contents=prompt,
-                        config=request_config,
-                    )
-                if not response.text:
-                    raise RuntimeError("Gemini вернул пустой ответ")
-                return RoutineAnalysis.model_validate_json(response.text), observed_days
-            except Exception as exc:
-                if not _is_retryable_gemini_error(exc):
-                    raise
-                last_error = exc
-                if attempt + 1 < attempts:
-                    await asyncio.sleep(1.5 * (attempt + 1))
-
-    raise RuntimeError("Gemini временно перегружен после повторных попыток") from last_error
+    response = await _generate_with_fallback(api_key, model_name, prompt, request_config)
+    return RoutineAnalysis.model_validate_json(response.text), observed_days
 
 
 def format_analysis_card(analysis: RoutineAnalysis, observed_days: int) -> str:

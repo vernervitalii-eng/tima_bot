@@ -63,6 +63,12 @@ async def main() -> None:
     # Полный сброс администратора удаляет семью, участников и журналы.
     async with db_session() as session:
         admin = await crud.get_user(session, 1001)
+        await crud.save_ai_routine_snapshot(
+            session,
+            admin.child_id,
+            '{"schedule":[{"time":"20:00","event":"Ночной сон"}]}',
+            now,
+        )
         child_id = admin.child_id
         await crud.delete_family(session, child_id)
     async with db_session() as session:
@@ -70,6 +76,7 @@ async def main() -> None:
         assert await crud.get_user(session, 1002) is None
         assert await crud.get_user(session, 1004) is None
         assert await session.get(Child, child_id) is None
+        assert await crud.get_ai_routine_snapshot(session, child_id) is None
 
     # Проверяем совместимость регистраций роутеров с установленной aiogram 3.x.
     from aiogram import Dispatcher

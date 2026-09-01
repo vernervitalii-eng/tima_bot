@@ -11,7 +11,12 @@ from config import Settings
 from database import crud
 from database.session import db_session
 from keyboards.inline import ai_refresh_keyboard
-from services.ai_analyst import analyze_routine, build_sleep_history, format_analysis_card
+from services.ai_analyst import (
+    analyze_routine,
+    build_sleep_history,
+    format_analysis_card,
+    remember_base_routine,
+)
 from services.time_utils import age_parts, to_local, utc_now
 
 
@@ -36,6 +41,7 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
         logs = await crud.completed_sleeps_since(session, user.child_id, since)
         birth_date = user.child.birth_date
         timezone_name = user.child.timezone
+        child_id = user.child_id
         today = to_local(utc_now(), timezone_name).date()
         age_months, _ = age_parts(birth_date, today)
 
@@ -61,6 +67,9 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
             timezone_name,
             logs,
         )
+        base_routine = remember_base_routine(child_id, analysis)
+        async with db_session() as session:
+            await crud.save_ai_routine_snapshot(session, child_id, base_routine, utc_now())
         card = format_analysis_card(analysis, days)
     except Exception:
         logger.exception("Не удалось выполнить Gemini-анализ режима")

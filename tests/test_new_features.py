@@ -1,12 +1,28 @@
 import ast
+import asyncio
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 from database.models import SleepLog, SleepType
 from chart_generator import generate_sleep_chart
-from keyboards.inline import ai_refresh_keyboard, day_date_keyboard, day_period_keyboard, history_keyboard
+from keyboards.inline import (
+    ai_dialog_exit_keyboard,
+    ai_refresh_keyboard,
+    day_date_keyboard,
+    day_period_keyboard,
+    history_keyboard,
+)
 from keyboards.main import main_keyboard
-from services.ai_analyst import RoutineAnalysis, ScheduleItem, build_sleep_history, format_analysis_card
+from services.ai_analyst import (
+    RoutineAnalysis,
+    ScheduleItem,
+    ask_sleep_consultant,
+    build_consultation_context,
+    build_sleep_history,
+    format_analysis_card,
+    format_consultant_answer,
+    trim_dialog_history,
+)
 from services.day_timeline import build_day_timeline, local_date_bounds_utc
 from services.sleep_insights import build_wake_widget, typical_wake_minutes
 from services.live_status import build_live_status_card
@@ -98,10 +114,12 @@ def test_ai_history_and_new_keyboards():
     assert "📅 Хронология дня" in labels
     assert "🧠 AI-Режим" in labels
     assert "📊 График снов" in labels
+    assert labels.count("💬 Чат с ИИ-консультантом") == 1
     sleeping_labels = [button.text for row in main_keyboard(True).keyboard for button in row]
     assert sleeping_labels[0] == "☀️ Проснулся"
     assert "💤 Уснул" not in sleeping_labels
     assert history_keyboard([1], 0, 1).inline_keyboard[0][0].callback_data == "history:delete:1:0"
+    assert ai_dialog_exit_keyboard().inline_keyboard[0][0].callback_data == "ai:dialog:exit"
 
 
 def test_live_status_card_for_sleep_and_wake():
@@ -131,6 +149,81 @@ def test_live_status_card_for_sleep_and_wake():
     assert "СТАТУС: РЕБЁНОК БОДРСТВУЕТ" in awake
     assert "Проснулся в: <code>11:00</code>" in awake
     assert "~14:00" in awake
+
+
+def test_ai_dialog_context_memory_and_safe_answer():
+    logs = [
+        sleep(datetime(2025, 3, 7, 20), datetime(2025, 3, 8, 6), SleepType.NIGHT.value),
+        sleep(datetime(2025, 3, 8, 9), datetime(2025, 3, 8, 10)),
+        sleep(datetime(2025, 3, 20, 10), datetime(2025, 3, 20, 11)),
+    ]
+    dialog = [
+        {"role": "user" if index % 2 == 0 else "assistant", "text": f"message-{index}"}
+        for index in range(16)
+    ]
+    trimmed = trim_dialog_history(dialog)
+    assert len(trimmed) == 12
+    assert trimmed[0]["text"] == "message-4"
+
+    context = build_consultation_context(
+        logs,
+        "UTC",
+        12,
+        trimmed,
+        '{"schedule":[{"time":"20:00","event":"Ночной сон"}]}',
+        now=datetime(2025, 3, 20, 12),
+    )
+    assert context["child_age_months"] == 12
+    assert context["month_summary"]["completed_sleeps"] == 3
+    assert len(context["sleep_history_last_14_days"]) == 3
+    assert len(context["dialog_history"]) == 12
+    assert "20:00" in context["last_base_routine"]
+
+    card = format_consultant_answer("Сдвиньте сон <на 11:00> & наблюдайте.")
+    assert "&lt;на 11:00&gt;" in card
+    assert "&amp;" in card
+    assert len(card) < 4096
+    assert len(format_consultant_answer("&" * 3500)) < 4096
+
+
+def test_ai_consultant_prompt_contains_parent_correction(monkeypatch):
+    captured = {}
+
+    class Response:
+        text = "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК\n11:00 — первый сон"
+
+    async def fake_generate(api_key, model_name, contents, config):
+        captured.update(contents=contents, config=config)
+        return Response()
+
+    monkeypatch.setattr("services.ai_analyst._generate_with_fallback", fake_generate)
+    result = asyncio.run(ask_sleep_consultant(
+        "test-key",
+        "test-model",
+        12,
+        "UTC",
+        [sleep(datetime(2025, 3, 20, 10), datetime(2025, 3, 20, 11))],
+        "В 10:00 не подходит, давай первый сон в 11:00",
+        [{"role": "assistant", "text": "Раньше предлагался сон в 10:00"}],
+        '{"schedule":[{"time":"10:00","event":"Первый сон"}]}',
+    ))
+    assert "давай первый сон в 11:00" in captured["contents"]
+    assert "last_base_routine" in captured["contents"]
+    assert "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК" in captured["config"]["system_instruction"]
+    assert result.startswith("ОБНОВЛЁННЫЙ")
+
+
+def test_ai_dialog_router_precedes_standard_text_handlers():
+    from aiogram import Dispatcher
+    from handlers import register_handlers
+    from handlers.states import AIState
+
+    dispatcher = Dispatcher()
+    register_handlers(dispatcher)
+    names = [router.name for router in dispatcher.sub_routers]
+    assert AIState.in_dialog.state == "AIState:in_dialog"
+    assert names.index("ai_dialog") < names.index("common")
+    assert names.index("ai_dialog") < names.index("sleep")
 
 
 def test_ai_card_is_html_safe_and_fits_telegram_limit():

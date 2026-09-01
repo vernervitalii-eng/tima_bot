@@ -7,7 +7,7 @@ import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.fsm.storage.memory import MemoryStorage
+from aiogram.fsm.storage.memory import MemoryStorage, SimpleEventIsolation
 from aiogram.types import BotCommand
 
 from auth import AllowedIdsMiddleware
@@ -42,6 +42,7 @@ async def main() -> None:
             BotCommand(command="status", description="Текущий статус ребёнка"),
             BotCommand(command="day", description="Хронология дня"),
             BotCommand(command="ai_routine", description="AI-анализ режима"),
+            BotCommand(command="ask_ai", description="Чат с ИИ-консультантом"),
             BotCommand(command="chart", description="График снов"),
             BotCommand(command="history", description="История записей"),
         ])
@@ -50,7 +51,10 @@ async def main() -> None:
             "Не удалось обновить список команд Telegram; polling продолжит работу.",
             exc_info=True,
         )
-    dispatcher = Dispatcher(storage=MemoryStorage())
+    dispatcher = Dispatcher(
+        storage=MemoryStorage(),
+        events_isolation=SimpleEventIsolation(),
+    )
     dispatcher["settings"] = settings
     allowed_ids_middleware = AllowedIdsMiddleware()
     dispatcher.message.middleware(allowed_ids_middleware)

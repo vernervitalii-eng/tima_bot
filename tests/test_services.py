@@ -4,7 +4,7 @@ from services.norms import norm_for_age
 from services.time_utils import age_parts, is_quiet_hours, parse_relative_time
 from keyboards.inline import family_keyboard, settings_keyboard, start_choice_keyboard
 from config import DB_DIR, DEFAULT_DB_PATH, PROJECT_DIR, normalize_database_url
-from database.models import SleepLog
+from database.models import AIRoutineSnapshot, SleepLog
 from sqlalchemy.schema import CreateIndex, CreateTable
 from sqlalchemy.dialects import postgresql, sqlite
 
@@ -69,3 +69,5 @@ def test_postgres_active_sleep_unique_index():
 def test_table_initialization_uses_if_not_exists():
     ddl = str(CreateTable(SleepLog.__table__, if_not_exists=True).compile(dialect=sqlite.dialect()))
     assert "CREATE TABLE IF NOT EXISTS" in ddl
+    ai_ddl = str(CreateTable(AIRoutineSnapshot.__table__, if_not_exists=True).compile(dialect=sqlite.dialect()))
+    assert "CREATE TABLE IF NOT EXISTS" in ai_ddl

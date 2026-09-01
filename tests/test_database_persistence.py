@@ -19,6 +19,12 @@ def test_repeated_initialization_preserves_existing_history(tmp_path):
             await crud.start_sleep(
                 session, admin.child_id, admin.id, datetime(2025, 3, 20, 10, 0)
             )
+            await crud.save_ai_routine_snapshot(
+                session,
+                admin.child_id,
+                '{"schedule":[{"time":"20:00","event":"Ночной сон"}]}',
+                datetime(2025, 3, 20, 12, 0),
+            )
             await session.execute(text(
                 "CREATE TABLE IF NOT EXISTS legacy_records "
                 "(id INTEGER PRIMARY KEY, child_id INTEGER, payload TEXT)"
@@ -37,6 +43,9 @@ def test_repeated_initialization_preserves_existing_history(tmp_path):
             active = await crud.active_sleep(session, admin.child_id)
             assert active is not None
             assert active.start_time == datetime(2025, 3, 20, 10, 0)
+            snapshot = await crud.get_ai_routine_snapshot(session, admin.child_id)
+            assert snapshot is not None
+            assert "20:00" in snapshot.payload_json
             legacy_payload = await session.scalar(text("SELECT payload FROM legacy_records LIMIT 1"))
             assert legacy_payload == "старые данные"
         backup_payload = await read_sqlite_bytes(database_path)

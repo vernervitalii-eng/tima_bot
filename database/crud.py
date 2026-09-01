@@ -11,7 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import Child, SleepLog, SleepType, User, UserRole
+from database.models import AIRoutineSnapshot, Child, SleepLog, SleepType, User, UserRole
 
 
 async def get_user(session: AsyncSession, telegram_id: int) -> User | None:
@@ -215,6 +215,39 @@ async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
     return await session.get(User, user_id)
 
 
+async def save_ai_routine_snapshot(
+    session: AsyncSession,
+    child_id: int,
+    payload_json: str,
+    generated_at: datetime,
+) -> AIRoutineSnapshot:
+    """Идемпотентно сохраняет только последний режим, не трогая историю сна."""
+    snapshot = await session.scalar(
+        select(AIRoutineSnapshot).where(AIRoutineSnapshot.child_id == child_id)
+    )
+    if snapshot is None:
+        snapshot = AIRoutineSnapshot(
+            child_id=child_id,
+            payload_json=payload_json,
+            generated_at=generated_at,
+        )
+        session.add(snapshot)
+    else:
+        snapshot.payload_json = payload_json
+        snapshot.generated_at = generated_at
+    await session.flush()
+    return snapshot
+
+
+async def get_ai_routine_snapshot(
+    session: AsyncSession,
+    child_id: int,
+) -> AIRoutineSnapshot | None:
+    return await session.scalar(
+        select(AIRoutineSnapshot).where(AIRoutineSnapshot.child_id == child_id)
+    )
+
+
 async def seed_monthly_data(
     session: AsyncSession,
     child_id: int,
@@ -315,6 +348,7 @@ async def delete_family(session: AsyncSession, child_id: int) -> None:
     )
     if has_legacy_activity_table:
         await session.execute(text("DELETE FROM activity_logs WHERE child_id = :child_id"), {"child_id": child_id})
+    await session.execute(delete(AIRoutineSnapshot).where(AIRoutineSnapshot.child_id == child_id))
     await session.execute(delete(SleepLog).where(SleepLog.child_id == child_id))
     await session.execute(delete(User).where(User.child_id == child_id))
     await session.execute(delete(Child).where(Child.id == child_id))

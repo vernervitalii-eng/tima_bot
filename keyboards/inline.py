@@ -115,6 +115,12 @@ def ai_refresh_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def ai_dialog_exit_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Выйти из чата", callback_data="ai:dialog:exit")],
+    ])
+
+
 def history_keyboard(log_ids: list[int], page: int, total_pages: int) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(

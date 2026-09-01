@@ -21,3 +21,7 @@ class JoinFamily(StatesGroup):
 
 class InviteFamily(StatesGroup):
     telegram_id = State()
+
+
+class AIState(StatesGroup):
+    in_dialog = State()
