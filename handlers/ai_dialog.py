@@ -29,16 +29,13 @@ logger = logging.getLogger(__name__)
 router = Router(name="ai_dialog")
 
 AI_DIALOG_GREETING = (
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "🧠 <b>ИИ-КОНСУЛЬТАНТ ПО РЕЖИМУ</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
+    "🧠 <b>Консультант по режиму</b>\n\n"
     "Я изучил всю историю снов и текущий график. Вы можете задать любой вопрос, "
     "внести замечания или попросить скорректировать режим:\n\n"
-    "• <i>«Почему в 14:00 он долго укладывается?»</i>\n"
-    "• <i>«Давай сместим ночной сон на 21:00»</i>\n"
-    "• <i>«Он сегодня проснулся раньше, как перестроить день?»</i>\n\n"
-    "Отправьте сообщение с вопросом или нажмите кнопку выхода.\n"
-    "━━━━━━━━━━━━━━━━━━━━"
+    "• <i>Почему в 14:00 он долго укладывается?</i>\n"
+    "• <i>Давай сместим ночной сон на 21:00.</i>\n"
+    "• <i>Как перестроить день после раннего подъёма?</i>\n\n"
+    "Напишите вопрос или завершите консультацию кнопкой ниже."
 )
 
 
@@ -55,14 +52,14 @@ async def _finish_dialog(
             return
         view = await build_live_status_view(session, user.child)
     await message.answer(
-        f"✅ <b>Диалог с ИИ завершён</b>\n\n{view.text}",
+        f"Консультация завершена.\n\n{view.text}",
         reply_markup=main_keyboard(view.is_sleeping),
         disable_notification=view.silent,
     )
 
 
 @router.message(Command("ask_ai"))
-@router.message(F.text == "💬 Чат с ИИ-консультантом")
+@router.message(F.text.in_({"💬 Консультант", "💬 Чат с ИИ-консультантом"}))
 async def enter_ai_dialog(message: Message, state: FSMContext, settings: Settings) -> None:
     if not await require_premium_access(message, message.from_user.id):
         return
@@ -89,7 +86,7 @@ async def enter_ai_dialog(message: Message, state: FSMContext, settings: Setting
         ai_busy=False,
     )
     await message.answer(
-        "💬 Режим консультации включён. Обычная клавиатура временно скрыта.",
+        "Режим консультации включён. Основное меню временно скрыто.",
         reply_markup=ReplyKeyboardRemove(),
     )
     await message.answer(AI_DIALOG_GREETING, reply_markup=ai_dialog_exit_keyboard())
@@ -140,8 +137,7 @@ async def ai_dialog_question(
         return
     await state.update_data(ai_busy=True)
     progress = await message.answer(
-        "🧠 <b>Анализирую вопрос…</b>\n"
-        "<code>▓▓▓▓▓░░░░░</code> Сверяю его с историей сна.",
+        "🧠 Анализирую вопрос и сверяю его с историей сна…",
         reply_markup=ai_dialog_exit_keyboard(),
     )
 
@@ -208,7 +204,7 @@ async def ai_dialog_question(
         if await state.get_state() == AIState.in_dialog.state:
             await state.update_data(ai_busy=False)
             await progress.edit_text(
-                "⚠️ <b>ИИ-консультант временно недоступен</b>\n\n"
+                "<b>ИИ-консультант временно недоступен</b>\n\n"
                 "Состояние диалога сохранено. Попробуйте повторить вопрос немного позже или выйдите из чата.",
                 reply_markup=ai_dialog_exit_keyboard(),
             )

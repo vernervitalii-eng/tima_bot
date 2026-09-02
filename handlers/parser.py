@@ -57,10 +57,10 @@ async def parse_natural_message(message: Message) -> None:
             return
         stats = await crud.seed_monthly_data(session, current.child_id, current.id, sleeps)
 
-    warning = f"\n⚠️ Предупреждений парсера: {len(parsed.warnings)}" if parsed.warnings else ""
+    warning = f"\nТребуют проверки: {len(parsed.warnings)}" if parsed.warnings else ""
     await message.answer(
-        "✅ События распознаны и сохранены.\n"
-        f"💤 Снов добавлено: {stats['sleep_added']}\n"
-        f"↩️ Дубликатов пропущено: {stats['sleep_skipped']}"
+        "<b>Данные сохранены</b>\n\n"
+        f"Снов добавлено: <code>{stats['sleep_added']}</code>\n"
+        f"Дубликатов пропущено: <code>{stats['sleep_skipped']}</code>"
         + warning
     )

@@ -46,7 +46,7 @@ async def _load_day(telegram_id: int, selected_date: date) -> tuple[str, bool, d
 
 
 @router.message(Command("day"))
-@router.message(F.text == "📅 Хронология дня")
+@router.message(F.text.in_({"📅 День", "📅 Хронология дня"}))
 async def day_view(message: Message) -> None:
     now = utc_now()
     async with db_session() as session:

@@ -48,11 +48,11 @@ async def _send_chart(message: Message, telegram_id: int, days: int) -> None:
             child_name,
         )
     except Exception as exc:
-        await message.answer(f"⚠️ Не удалось построить график: {exc}")
+        await message.answer(f"Не удалось построить график: {exc}")
         return
     await message.answer_photo(
         BufferedInputFile(image.getvalue(), filename=f"sleep_chart_{days}d.png"),
-        caption=f"📊 Сон за последние {days} дней • {child_name}",
+        caption=f"<b>Сон за последние {days} дней</b> · {child_name}",
         reply_markup=chart_period_keyboard(),
     )
 
@@ -65,6 +65,7 @@ async def chart_command(message: Message, command: CommandObject) -> None:
 
 @router.message(F.text == "📊 График снов (Неделя)")
 @router.message(F.text == "📊 График снов")
+@router.message(F.text == "📊 График")
 async def chart_button(message: Message) -> None:
     await _send_chart(message, message.from_user.id, 7)
 

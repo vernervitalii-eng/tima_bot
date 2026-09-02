@@ -6,8 +6,8 @@ from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 def start_choice_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="👶 Создать новую семью", callback_data="onboarding:create")],
-        [InlineKeyboardButton(text="🔗 Подключиться по коду", callback_data="onboarding:join")],
+        [InlineKeyboardButton(text="Создать семью", callback_data="onboarding:create")],
+        [InlineKeyboardButton(text="Ввести семейный код", callback_data="onboarding:join")],
     ])
 
 
@@ -18,7 +18,7 @@ def edit_time_keyboard(log_id: int, field: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="−30 мин", callback_data=f"adjust:{field}:{log_id}:-30"),
             InlineKeyboardButton(text="+10 мин", callback_data=f"adjust:{field}:{log_id}:10"),
         ],
-        [InlineKeyboardButton(text="✏️ Ввести вручную", callback_data=f"edit:{field}:{log_id}")],
+        [InlineKeyboardButton(text="Ввести время", callback_data=f"edit:{field}:{log_id}")],
     ])
 
 
@@ -28,7 +28,7 @@ def join_role_keyboard() -> InlineKeyboardMarkup:
          InlineKeyboardButton(text="Папа", callback_data="join-role:Папа")],
         [InlineKeyboardButton(text="Бабушка", callback_data="join-role:Бабушка"),
          InlineKeyboardButton(text="Няня", callback_data="join-role:Няня")],
-        [InlineKeyboardButton(text="✏️ Другое имя", callback_data="join-role:custom")],
+        [InlineKeyboardButton(text="Другое имя", callback_data="join-role:custom")],
     ])
 
 
@@ -36,16 +36,16 @@ def family_keyboard(is_admin: bool) -> InlineKeyboardMarkup | None:
     if not is_admin:
         return None
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="➕ Пригласить по Telegram ID", callback_data="family:invite")],
+        [InlineKeyboardButton(text="Пригласить по ID", callback_data="family:invite")],
     ])
 
 
 def settings_keyboard(silent_mode: bool, is_admin: bool = True) -> InlineKeyboardMarkup:
-    label = "🔕 Тихий режим: ВКЛ" if silent_mode else "🔔 Тихий режим: ВЫКЛ"
-    reset_label = "🗑 Полный сброс" if is_admin else "🚪 Покинуть семью"
+    label = "Тихий режим: вкл." if silent_mode else "Тихий режим: выкл."
+    reset_label = "Сбросить данные" if is_admin else "Покинуть семью"
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text=label, callback_data="settings:toggle-silent")],
-        [InlineKeyboardButton(text="📤 Экспорт данных", callback_data="export:menu")],
+        [InlineKeyboardButton(text="Экспорт данных", callback_data="export:menu")],
         [InlineKeyboardButton(text=reset_label, callback_data="settings:reset")],
     ])
 
@@ -54,7 +54,7 @@ def reset_confirmation_keyboard(is_admin: bool) -> InlineKeyboardMarkup:
     action = "family" if is_admin else "leave"
     label = "Да, удалить всё" if is_admin else "Да, выйти"
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text=f"⚠️ {label}", callback_data=f"confirm-reset:{action}")],
+        [InlineKeyboardButton(text=label, callback_data=f"confirm-reset:{action}")],
         [InlineKeyboardButton(text="Отмена", callback_data="confirm-reset:cancel")],
     ])
 
@@ -69,18 +69,18 @@ def export_keyboard() -> InlineKeyboardMarkup:
 def day_period_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📅 Сегодня", callback_data="day:today"),
-            InlineKeyboardButton(text="⏪ Вчера", callback_data="day:yesterday"),
+            InlineKeyboardButton(text="Сегодня", callback_data="day:today"),
+            InlineKeyboardButton(text="Вчера", callback_data="day:yesterday"),
         ],
-        [InlineKeyboardButton(text="🗓 Выбрать дату", callback_data="day:pick")],
+        [InlineKeyboardButton(text="Выбрать дату", callback_data="day:pick")],
     ])
 
 
 def chart_period_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [
-            InlineKeyboardButton(text="📊 7 дней", callback_data="chart:7"),
-            InlineKeyboardButton(text="📈 14 дней", callback_data="chart:14"),
+            InlineKeyboardButton(text="7 дней", callback_data="chart:7"),
+            InlineKeyboardButton(text="14 дней", callback_data="chart:14"),
         ],
     ])
 
@@ -103,7 +103,7 @@ def day_navigation_keyboard(selected: date, today: date) -> InlineKeyboardMarkup
     next_day = selected + timedelta(days=1)
     rows = [[
         InlineKeyboardButton(text="◀️ Вчера", callback_data=f"day:nav:{previous:%Y-%m-%d}"),
-        InlineKeyboardButton(text="📅 Выбрать дату", callback_data="day:pick"),
+        InlineKeyboardButton(text="Выбрать дату", callback_data="day:pick"),
         InlineKeyboardButton(text="Завтра ▶️", callback_data=f"day:nav:{next_day:%Y-%m-%d}")
         if next_day <= today else InlineKeyboardButton(text="Сегодня", callback_data="day:today"),
     ]]
@@ -112,13 +112,13 @@ def day_navigation_keyboard(selected: date, today: date) -> InlineKeyboardMarkup
 
 def ai_refresh_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="🔄 Обновить анализ", callback_data="ai:refresh")],
+        [InlineKeyboardButton(text="Обновить", callback_data="ai:refresh")],
     ])
 
 
 def ai_dialog_exit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="❌ Выйти из чата", callback_data="ai:dialog:exit")],
+        [InlineKeyboardButton(text="Завершить", callback_data="ai:dialog:exit")],
     ])
 
 

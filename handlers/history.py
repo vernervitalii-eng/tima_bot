@@ -46,14 +46,13 @@ def _record_text(log: SleepLog, position: int | None, timezone_name: str) -> str
         else local_end.strftime("%d.%m %H:%M") if local_end else "сейчас"
     )
     duration = (log.end_time or now) - log.start_time
-    icon = "🌙" if log.sleep_type == SleepType.NIGHT.value else "💤"
     kind = "Ночной сон" if log.sleep_type == SleepType.NIGHT.value else "Дневной сон"
     if log.end_time is None:
         kind = "Сон продолжается"
     prefix = f"{position}." if position is not None else "•"
     return (
-        f"{prefix} {icon} <code>{local_start:%d.%m %H:%M} — {end_label}</code>\n"
-        f"   └ <i>{kind} • {format_duration(duration)}</i>"
+        f"{prefix} <code>{local_start:%d.%m %H:%M} – {end_label}</code> · {kind} "
+        f"<i>(<code>{format_duration(duration)}</code>)</i>"
     )
 
 
@@ -67,7 +66,7 @@ def _interval_label(start, end, timezone_name: str) -> str:
 
 def _add_sleep_prompt() -> str:
     return (
-        "➕ <b>ДОБАВЛЕНИЕ ПРОПУЩЕННОГО СНА</b>\n\n"
+        "<b>Добавить пропущенный сон</b>\n\n"
         "Отправьте дату и интервал одним сообщением:\n"
         "<code>31.08.2026 10:15-11:30</code>\n"
         "или <code>вчера 21:00-07:30</code>\n\n"
@@ -99,12 +98,10 @@ async def _history_payload(
         body = "\n\n".join(blocks)
         markup = history_keyboard([log.id for log in logs], page, total_pages)
     else:
-        body = "🫧 <i>Записей сна пока нет.</i>"
+        body = "<i>Записей сна пока нет.</i>"
         markup = history_keyboard([], page, total_pages)
     text = (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"📋 <b>ИСТОРИЯ СНА • {escape(child_name)}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📋 <b>История сна · {escape(child_name)}</b>\n\n"
         f"{body}\n\n"
         f"<i>Страница {page + 1} из {total_pages} • всего записей: {total}</i>"
     )
@@ -126,7 +123,7 @@ async def _edit_history(message: Message, telegram_id: int, page: int) -> None:
 
 @router.message(Command("history"))
 @router.message(Command("list"))
-@router.message(F.text == "📋 История записей")
+@router.message(F.text.in_({"📋 История", "📋 История записей"}))
 async def history_view(message: Message, state: FSMContext) -> None:
     await state.clear()
     payload = await _history_payload(message.from_user.id, 0)
@@ -159,7 +156,7 @@ async def history_edit_open(callback: CallbackQuery, state: FSMContext) -> None:
             return
         preview = _record_text(log, None, user.child.timezone)
     await callback.message.edit_text(
-        "✏️ <b>ИСПРАВЛЕНИЕ ЗАПИСИ</b>\n\n"
+        "<b>Изменить запись</b>\n\n"
         f"{preview}\n\n"
         "Что именно нужно изменить?",
         reply_markup=history_edit_keyboard(log_id, page),
@@ -271,9 +268,7 @@ async def history_edit_value(message: Message, state: FSMContext) -> None:
         if candidate_end is not None else "сон продолжается"
     )
     await message.answer(
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "✏️ <b>ПРОВЕРЬТЕ ИЗМЕНЕНИЕ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>Проверьте изменение</b>\n\n"
         f"Было: <code>{_interval_label(data['expected_start'], data['expected_end'], timezone_name)}</code>\n"
         f"Будет: <code>{_interval_label(candidate_start, candidate_end, timezone_name)}</code>\n"
         f"Длительность: <code>{duration}</code>",
@@ -418,9 +413,7 @@ async def history_add_interval(message: Message, state: FSMContext) -> None:
     await state.update_data(start=start, end=end, timezone_name=timezone_name)
     await state.set_state(AddMissedSleep.confirm)
     await message.answer(
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "➕ <b>ПРОВЕРЬТЕ НОВУЮ ЗАПИСЬ</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>Проверьте новую запись</b>\n\n"
         f"Сон: <code>{_interval_label(start, end, timezone_name)}</code>\n"
         f"Длительность: <code>{format_duration(end - start)}</code>\n\n"
         "Сохранить эту запись?",
@@ -507,7 +500,7 @@ async def history_delete_prompt(callback: CallbackQuery) -> None:
             return
         preview = _record_text(log, None, user.child.timezone)
     await callback.message.edit_text(
-        "⚠️ <b>Удалить эту запись?</b>\n\n"
+        "<b>Удалить эту запись?</b>\n\n"
         f"{preview}\n\n"
         "Это действие удалит только выбранный сон и не затронет остальные данные.",
         reply_markup=history_delete_confirmation_keyboard(log_id, page),

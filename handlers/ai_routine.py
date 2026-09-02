@@ -59,8 +59,7 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
         return
 
     progress = await message.answer(
-        "🧠 <b>Анализирую режим…</b>\n"
-        "<code>▓▓▓▓▓░░░░░</code> Ищу устойчивые окна сна и бодрствования."
+        "🧠 Анализирую режим и ищу устойчивые окна сна…"
     )
     try:
         analysis, days = await analyze_routine(
@@ -88,6 +87,7 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
 @router.message(F.text == "🧠 AI-анализ")
 @router.message(F.text == "🧠 AI-Режим")
 @router.message(F.text == "🧠 AI-Режим (Gemini)")
+@router.message(F.text == "🧠 Режим (AI)")
 async def ai_routine(message: Message, settings: Settings) -> None:
     await _run_analysis(message, message.from_user.id, settings)
 

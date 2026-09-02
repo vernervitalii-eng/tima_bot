@@ -66,7 +66,10 @@ async def do_sleep_start(message: Message, at=None) -> None:
         author = user.display_name
     schedule_after_sleep(message.bot, child_id, log_id, at)
     local = to_local(at, timezone)
-    text = f"💤 {name} уснул(а) в {local:%H:%M}. Приятного отдыха!\n\n<i>Запись добавил(а): {author}</i>"
+    text = (
+        f"<b>{name} уснул(а) в <code>{local:%H:%M}</code></b>\n\n"
+        f"<i>Запись добавил(а): {author}</i>"
+    )
     async with db_session() as session:
         ids = await crud.family_telegram_ids(session, child_id)
         child = await session.get(Child, child_id)
@@ -226,7 +229,8 @@ async def adjust_time(callback: CallbackQuery, bot: Bot) -> None:
     await resync_child_runtime(bot, child_id)
     sign = "+" if delta > 0 else ""
     await callback.message.answer(
-        f"✏️ Время изменено на {sign}{delta} мин: {to_local(new_value, timezone):%H:%M}.\n"
+        f"Время изменено на {sign}{delta} мин: "
+        f"<code>{to_local(new_value, timezone):%H:%M}</code>.\n"
         f"<i>Изменил(а): {author}</i>"
     )
 

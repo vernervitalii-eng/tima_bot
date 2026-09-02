@@ -36,19 +36,16 @@ def build_live_status_card(
     last_completed_sleep,
     typical_wake: int,
 ) -> str:
-    """Формирует крупную HTML-карточку из единого снимка БД."""
-    child_line = f"👶 <b>{escape(child_name)}</b>\n"
+    """Формирует компактную HTML-карточку из единого снимка БД."""
+    child_line = f"<i>{escape(child_name)}</i>\n\n"
     if active_sleep is not None:
         local_start = to_local(active_sleep.start_time, timezone_name)
         elapsed = max(now - active_sleep.start_time, timedelta())
         return (
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🟢 <b>СТАТУС: РЕБЁНОК СПИТ 💤</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
+            "<b>Ребёнок спит</b> 💤\n"
             f"{child_line}"
-            f"⏱ Уснул в: <code>{local_start:%H:%M}</code> "
-            f"(спит уже: <code>{format_duration(elapsed)}</code>)\n"
-            "━━━━━━━━━━━━━━━━━━━━"
+            f"Уснул: <code>{local_start:%H:%M}</code>\n"
+            f"Спит: <code>{format_duration(elapsed)}</code>"
         )
 
     if last_completed_sleep is not None and last_completed_sleep.end_time is not None:
@@ -57,25 +54,18 @@ def build_live_status_card(
         target = to_local(wake_at + timedelta(minutes=typical_wake), timezone_name)
         elapsed = max(now - wake_at, timedelta())
         return (
-            "━━━━━━━━━━━━━━━━━━━━\n"
-            "🟡 <b>СТАТУС: РЕБЁНОК БОДРСТВУЕТ ☀️</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━\n"
+            "<b>Ребёнок бодрствует</b> ☀️\n"
             f"{child_line}"
-            f"⏱ Проснулся в: <code>{local_wake:%H:%M}</code> "
-            f"(бодрствует: <code>{format_duration(elapsed)}</code>)\n"
-            f"🎯 Окно в следующий сон: <code>~{target:%H:%M}</code> "
-            "<i>(по среднему ВБ)</i>\n"
-            "━━━━━━━━━━━━━━━━━━━━"
+            f"Проснулся: <code>{local_wake:%H:%M}</code>\n"
+            f"Бодрствует: <code>{format_duration(elapsed)}</code>\n"
+            f"Окно сна: <code>~{target:%H:%M}</code> <i>по среднему ВБ</i>"
         )
 
     return (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🟡 <b>СТАТУС: РЕБЁНОК БОДРСТВУЕТ ☀️</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        "<b>Ребёнок бодрствует</b> ☀️\n"
         f"{child_line}"
-        "⏱ Время последнего пробуждения ещё не записано.\n"
-        "🎯 Окно в следующий сон появится после первой завершённой записи.\n"
-        "━━━━━━━━━━━━━━━━━━━━"
+        "Время последнего пробуждения пока не записано.\n"
+        "Окно сна появится после первой завершённой записи."
     )
 
 

@@ -19,21 +19,18 @@ router = Router(name="common")
 
 
 WELCOME_CARD = (
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    f"👶 <b>{BRAND_NAME} • Персональный консультант по сну</b>\n"
-    "━━━━━━━━━━━━━━━━━━━━\n"
-    "Добро пожаловать! Этот бот помогает родителям наладить стабильный режим "
-    "сна ребёнка без слёз и переутомлений.\n\n"
-    "✨ <b>Что умеет бот:</b>\n"
-    "• 💤 <b>Умный трекинг:</b> сон и подъём в один клик или текстом.\n"
-    "• ⏱ <b>Контроль бодрствования:</b> расчёт ВБ и длительности.\n"
-    "• 🎯 <b>Смарт-окна сна:</b> прогноз следующего укладывания.\n"
-    "• 🧠 <b>AI-Сомнолог:</b> анализ биоритмов и график дня.\n"
-    "• 💬 <b>Диалог с экспертом:</b> вопросы и корректировка режима.\n"
-    "• 📊 <b>Отчёты:</b> диаграммы и хронология суток.\n\n"
-    "🎁 <b>Вам доступно 3 дня полного Premium-доступа!</b>\n"
-    "Триал начнётся автоматически после создания или подключения профиля.\n"
-    "━━━━━━━━━━━━━━━━━━━━"
+    f"👶 <b>{BRAND_NAME}</b>\n"
+    "Персональный помощник по сну малыша\n\n"
+    "Отмечайте сон и пробуждения, следите за бодрствованием и получайте "
+    "рекомендации по режиму.\n\n"
+    "<b>Возможности</b>\n"
+    "• Сон и подъём в одно касание\n"
+    "• Расчёт длительности сна и бодрствования\n"
+    "• Прогноз следующего окна сна\n"
+    "• AI-анализ и консультации\n"
+    "• Хронология и графики\n\n"
+    "🎁 <b>3 дня Premium бесплатно</b>\n"
+    "Период начнётся после создания или подключения профиля."
 )
 
 
@@ -46,8 +43,8 @@ async def start(message: Message, state: FSMContext) -> None:
             months, days = age_parts(user.child.birth_date)
             view = await build_live_status_view(session, user.child)
             await message.answer(
-                f"👶 <b>{BRAND_NAME}</b>\n"
-                f"С возвращением! {user.child.name}: {months} мес. {days} дн.\n"
+                f"<b>{BRAND_NAME}</b>\n"
+                f"{user.child.name} · {months} мес. {days} дн.\n"
                 f"{premium_status_text(user, timezone_name=user.child.timezone)}\n\n"
                 f"{view.text}",
                 reply_markup=main_keyboard(view.is_sleeping),
@@ -125,7 +122,7 @@ async def cancel(message: Message, state: FSMContext) -> None:
             return
         view = await build_live_status_view(session, user.child)
     await message.answer(
-        f"↩️ <b>Действие отменено</b>\n\n{view.text}",
+        f"Действие отменено.\n\n{view.text}",
         reply_markup=main_keyboard(view.is_sleeping),
         disable_notification=view.silent,
     )

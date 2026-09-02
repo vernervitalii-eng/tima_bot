@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta
 from html import escape
 from statistics import mean
@@ -288,24 +289,27 @@ def consultation_requires_schedule(question: str) -> bool:
 def consultant_answer_to_text(answer: ConsultantAnswer) -> str:
     parts = [answer.answer.strip()]
     if answer.key_facts:
-        parts.append("ФАКТЫ ИЗ ИСТОРИИ")
-        parts.extend(f"• {item.strip()}" for item in answer.key_facts if item.strip())
+        facts = ["Факты из истории"]
+        facts.extend(f"• {item.strip()}" for item in answer.key_facts if item.strip())
+        parts.append("\n".join(facts))
     if answer.updated_schedule:
-        parts.append("ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК")
-        parts.extend(
-            f"{item.time.strip()} — {item.event.strip()}"
+        schedule = ["Обновлённый график"]
+        schedule.extend(
+            f"• {item.time.strip()} · {item.event.strip()}"
             for item in answer.updated_schedule
         )
+        parts.append("\n".join(schedule))
     if answer.actions:
-        parts.append("ЧТО ДЕЛАТЬ СЕЙЧАС")
-        parts.extend(
-            f"{index}. {item.strip()}"
-            for index, item in enumerate(answer.actions, start=1)
+        actions = ["Следующие шаги"]
+        actions.extend(
+            f"• {item.strip()}"
+            for item in answer.actions
             if item.strip()
         )
+        parts.append("\n".join(actions))
     if answer.caveat.strip():
         parts.append(f"Важно: {answer.caveat.strip()}")
-    return "\n".join(part for part in parts if part)
+    return "\n\n".join(part for part in parts if part)
 
 
 async def ask_sleep_consultant(
@@ -332,7 +336,7 @@ async def ask_sleep_consultant(
         "Не ставь медицинских диагнозов и при тревожных симптомах советуй обратиться к педиатру. "
         "Учитывай пожелания родителя как новые ограничения. Если пользователь просит сдвинуть сон, перейти "
         "на другое число снов или сообщает новое обстоятельство, пересчитай весь оставшийся день и выдай блок "
-        "«ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК» с точными временными слотами. Объясни 2–4 ключевые причины и "
+        "«Обновлённый график» с точными временными слотами. Объясни 2–4 ключевые причины и "
         "предложи практический следующий шаг. Не используй Markdown или HTML — только аккуратный обычный текст."
     )
     prompt = (
@@ -371,12 +375,19 @@ def format_consultant_answer(answer: str) -> str:
         escaped_parts.append(escaped_character)
         escaped_length += len(escaped_character)
     safe = "".join(escaped_parts)
+    safe = re.sub(
+        r"(?<!\d)([01]?\d|2[0-3]):[0-5]\d(?!\d)",
+        lambda match: f"<code>{match.group(0)}</code>",
+        safe,
+    )
+    safe = re.sub(
+        r"(?m)^(Факты из истории|Обновлённый график|Следующие шаги)$",
+        r"<b>\1</b>",
+        safe,
+    )
     return (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 <b>ОТВЕТ ИИ-КОНСУЛЬТАНТА</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"{safe}\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 <b>Ответ консультанта</b>\n\n"
+        f"{safe}\n\n"
         "<i>Рекомендации справочные и не заменяют консультацию педиатра.</i>"
     )
 
@@ -425,23 +436,20 @@ def format_analysis_card(analysis: RoutineAnalysis, observed_days: int) -> str:
     insights = "\n".join(f"• {escape(item[:280])}" for item in analysis.insights[:4])
     schedule_lines = []
     visible_schedule = analysis.schedule[:7]
-    for index, item in enumerate(visible_schedule):
-        branch = "└" if index == len(visible_schedule) - 1 else "├"
-        schedule_lines.append(f"{branch} <code>{escape(item.time[:40])}</code> — {escape(item.event[:140])}")
+    for item in visible_schedule:
+        schedule_lines.append(f"• <code>{escape(item.time[:40])}</code> · {escape(item.event[:140])}")
     tips = "\n".join(
-        f"{index}. {escape(item[:280])}" for index, item in enumerate(analysis.tips[:4], start=1)
+        f"• {escape(item[:280])}" for item in analysis.tips[:4]
     )
     return (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 <b>AI-АНАЛИЗ И РЕКОМЕНДОВАННЫЙ РЕЖИМ</b>\n"
-        f"<i>На основе {observed_days} дней наблюдений</i>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📌 <b>Ключевые инсайты</b>\n{insights}\n\n"
-        "🕒 <b>Рекомендуемый почасовой распорядок</b>\n"
+        "🧠 <b>Режим и рекомендации</b>\n"
+        f"<i>По данным за {observed_days} дней</i>\n\n"
+        f"<b>Наблюдения</b>\n{insights}\n\n"
+        "<b>Распорядок</b>\n"
         + "\n".join(schedule_lines)
-        + "\n\n💡 <b>Персональные советы</b>\n"
+        + "\n\n<b>Что можно улучшить</b>\n"
         + tips
-        + "\n\n────────────────────\n"
+        + "\n\n"
         f"<i>{escape(analysis.caveat[:300])}</i>\n"
         "<i>AI-анализ носит справочный характер и не заменяет консультацию педиатра.</i>"
     )

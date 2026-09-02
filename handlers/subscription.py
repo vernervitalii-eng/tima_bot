@@ -31,7 +31,7 @@ router = Router(name="subscription")
 
 
 @router.message(Command("subscribe"))
-@router.message(F.text.in_({"⭐️ Premium подписка", "⭐ Premium подписка"}))
+@router.message(F.text.in_({"⭐️ Премиум", "⭐️ Premium подписка", "⭐ Premium подписка"}))
 async def premium_storefront(message: Message) -> None:
     async with db_session() as session:
         user = await crud.get_user(session, message.from_user.id)
@@ -136,17 +136,14 @@ async def premium_success(message: Message, state: FSMContext) -> None:
         return
     in_ai_dialog = await state.get_state() == AIState.in_dialog.state
     await message.answer(
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        "🎉 <b>PREMIUM АКТИВИРОВАН!</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"⭐️ Тариф: <b>{plan.months} мес.</b>\n"
-        f"📅 Доступ до: <code>{local_end:%d.%m.%Y %H:%M}</code>\n\n"
+        "⭐️ <b>Премиум активирован</b>\n\n"
+        f"Тариф: {plan.months} мес.\n"
+        f"Доступ до: <code>{local_end:%d.%m.%Y %H:%M}</code>\n\n"
         "Теперь доступны:\n"
-        "• 🧠 AI-анализ режима\n"
-        "• 💬 Чат с ИИ-сомнологом\n"
-        "• 📊 Графики сна\n"
-        "• 🎯 Персональные окна сна\n"
-        "━━━━━━━━━━━━━━━━━━━━",
+        "• AI-анализ режима\n"
+        "• Консультант по сну\n"
+        "• Графики сна\n"
+        "• Персональные окна сна",
         reply_markup=None if in_ai_dialog else main_keyboard(sleeping),
     )
 
@@ -154,7 +151,7 @@ async def premium_success(message: Message, state: FSMContext) -> None:
 @router.message(Command("terms"))
 async def payment_terms(message: Message) -> None:
     await message.answer(
-        "📄 <b>УСЛОВИЯ PREMIUM • BabyRhythm AI</b>\n\n"
+        "📄 <b>Условия Премиум · BabyRhythm AI</b>\n\n"
         "1. Premium — цифровой доступ к AI-анализу, чату и графикам на выбранный срок.\n"
         "2. Оплата выполняется один раз в Telegram Stars; автоматического продления нет.\n"
         "3. Доступ активируется только после подтверждения successful_payment от Telegram.\n"
@@ -175,7 +172,7 @@ async def payment_support(
     details = (command.args or "").strip()
     if not details:
         await message.answer(
-            "🛟 <b>ПОДДЕРЖКА ПО ОПЛАТЕ</b>\n\n"
+            "<b>Поддержка по оплате</b>\n\n"
             "Отправьте команду и кратко опишите проблему:\n"
             "<code>/paysupport оплатил, но Premium не включился</code>\n\n"
             "Сохраните квитанцию Telegram. Telegram Support не решает вопросы покупок "
@@ -253,7 +250,7 @@ async def give_premium(
 
     local_end = to_local(subscription_end, timezone_name)
     await message.answer(
-        "✅ <b>Premium выдан вручную</b>\n"
+        "<b>Premium выдан вручную</b>\n"
         f"Пользователь: <code>{target_id}</code>\n"
         f"Срок: <code>{days} дн.</code>\n"
         f"Действует до: <code>{local_end:%d.%m.%Y %H:%M}</code>"
@@ -263,7 +260,7 @@ async def give_premium(
     try:
         await bot.send_message(
             target_id,
-            "🎁 <b>Вам выдан Premium-доступ BabyRhythm AI</b>\n"
+            "<b>Вам выдан Premium-доступ BabyRhythm AI</b>\n"
             f"Срок: <code>{days} дн.</code>\n"
             f"Действует до: <code>{local_end:%d.%m.%Y %H:%M}</code>",
             reply_markup=main_keyboard(sleeping),

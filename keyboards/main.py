@@ -10,12 +10,10 @@ def main_keyboard(is_sleeping: bool | None) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             primary_row,
-            [KeyboardButton(text="📅 Хронология дня")],
-            [KeyboardButton(text="🧠 AI-Режим"), KeyboardButton(text="📊 График снов")],
-            [KeyboardButton(text="📋 История записей")],
-            [KeyboardButton(text="💬 Чат с ИИ-консультантом")],
-            [KeyboardButton(text="⭐️ Premium подписка")],
+            [KeyboardButton(text="📅 День"), KeyboardButton(text="🧠 Режим (AI)")],
+            [KeyboardButton(text="💬 Консультант"), KeyboardButton(text="⭐️ Премиум")],
+            [KeyboardButton(text="📊 График"), KeyboardButton(text="📋 История")],
         ],
         resize_keyboard=True,
-        input_field_placeholder="Выберите действие",
+        input_field_placeholder="Что записать?",
     )

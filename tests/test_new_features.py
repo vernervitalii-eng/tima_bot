@@ -55,12 +55,13 @@ def test_day_timeline_calculates_sleep_and_wake_intervals():
         wake_target_minutes=180,
         now=datetime(2025, 3, 21, 12),
     )
-    assert "ХРОНОЛОГИЯ • 20 МАРТА" in card
+    assert "20 марта, четверг" in card
     assert "Тима &lt;3" in card
     assert "Подъём" in card
-    assert "ВБ: 2 ч 30 мин" in card
-    assert "Дневной сон: <code>2 ч 00 мин</code> (2 снов)" in card
-    assert "Всего сна за сутки: <code>14 ч 00 мин</code>" in card
+    assert "Среднее бодрствование: <code>3ч 20м</code>" in card
+    assert "Дневной сон: <code>2ч 00м</code> (2 сна)" in card
+    assert "Всего сна: <code>14ч 00м</code>" in card
+    assert all(symbol not in card for symbol in ("━", "─", "▓", "░"))
 
 
 def test_local_date_bounds_are_timezone_aware():
@@ -87,10 +88,10 @@ def test_typical_wake_and_live_widget():
         samples,
         "Мама",
     )
-    assert "ПОДЪЁМ ЗАФИКСИРОВАН • 11:00" in card
+    assert "Подъём зафиксирован в <code>11:00</code>" in card
     assert "13:60" not in card
-    assert "14:00 — 14:15" in card
-    assert "спокойные ритуалы в <code>13:45</code>" in card
+    assert "~14:00 – 14:15" in card
+    assert "Ритуалы: <code>13:45</code>" in card
 
 
 def test_ai_history_and_new_keyboards():
@@ -112,15 +113,16 @@ def test_ai_history_and_new_keyboards():
     labels = [button.text for row in main_keyboard(False).keyboard for button in row]
     assert labels[0] == "💤 Уснул"
     assert "☀️ Проснулся" not in labels
-    assert "📅 Хронология дня" in labels
-    assert "🧠 AI-Режим" in labels
-    assert "📊 График снов" in labels
-    assert labels.count("💬 Чат с ИИ-консультантом") == 1
-    assert labels.count("📋 История записей") == 1
+    assert "📅 День" in labels
+    assert "🧠 Режим (AI)" in labels
+    assert "📊 График" in labels
+    assert labels.count("💬 Консультант") == 1
+    assert labels.count("📋 История") == 1
+    assert labels.count("⭐️ Премиум") == 1
     sleeping_labels = [button.text for row in main_keyboard(True).keyboard for button in row]
     assert sleeping_labels[0] == "☀️ Проснулся"
     assert "💤 Уснул" not in sleeping_labels
-    assert sleeping_labels.count("📋 История записей") == 1
+    assert sleeping_labels.count("📋 История") == 1
     history_callbacks = [
         button.callback_data
         for row in history_keyboard([1], 0, 1).inline_keyboard
@@ -143,9 +145,9 @@ def test_live_status_card_for_sleep_and_wake():
         None,
         180,
     )
-    assert "СТАТУС: РЕБЁНОК СПИТ" in sleeping
+    assert "Ребёнок спит" in sleeping
     assert "10:00" in sleeping
-    assert "1 ч 15 мин" in sleeping
+    assert "1ч 15м" in sleeping
 
     completed = sleep(datetime(2025, 3, 20, 10), datetime(2025, 3, 20, 11))
     awake = build_live_status_card(
@@ -156,8 +158,8 @@ def test_live_status_card_for_sleep_and_wake():
         completed,
         180,
     )
-    assert "СТАТУС: РЕБЁНОК БОДРСТВУЕТ" in awake
-    assert "Проснулся в: <code>11:00</code>" in awake
+    assert "Ребёнок бодрствует" in awake
+    assert "Проснулся: <code>11:00</code>" in awake
     assert "~14:00" in awake
 
 
@@ -190,7 +192,7 @@ def test_ai_dialog_context_memory_and_safe_answer():
     assert "20:00" in context["last_base_routine"]
 
     card = format_consultant_answer("Сдвиньте сон <на 11:00> & наблюдайте.")
-    assert "&lt;на 11:00&gt;" in card
+    assert "&lt;на <code>11:00</code>&gt;" in card
     assert "&amp;" in card
     assert len(card) < 4096
     assert len(format_consultant_answer("&" * 3500)) < 4096
@@ -226,8 +228,8 @@ def test_ai_consultant_prompt_contains_parent_correction(monkeypatch):
     ))
     assert "давай первый сон в 11:00" in captured["contents"]
     assert "last_base_routine" in captured["contents"]
-    assert "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК" in captured["config"]["system_instruction"]
-    assert "ОБНОВЛЁННЫЙ ПОЧАСОВОЙ ГРАФИК" in result
+    assert "Обновлённый график" in captured["config"]["system_instruction"]
+    assert "Обновлённый график" in result
     assert "11:00–12:15" in result
     assert consultation_requires_schedule("Мы переходим на один сон")
     assert not consultation_requires_schedule("Почему он долго засыпает?")
@@ -296,8 +298,15 @@ def test_ai_card_is_html_safe_and_fits_telegram_limit():
     )
     card = format_analysis_card(analysis, 14)
     assert "&lt;10:30&gt;" in card
-    assert "На основе 14 дней" in card
+    assert "По данным за 14 дней" in card
     assert len(card) < 4096
+
+
+def test_ui_templates_do_not_contain_heavy_visual_separators():
+    for folder in ("handlers", "services", "keyboards"):
+        for path in Path(folder).glob("*.py"):
+            source = path.read_text(encoding="utf-8")
+            assert all(symbol not in source for symbol in ("━", "─", "▓", "░")), path
 
 
 def test_chart_generator_returns_png_buffer():

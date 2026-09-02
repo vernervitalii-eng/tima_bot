@@ -108,7 +108,7 @@ def format_duration(delta: timedelta | None) -> str:
         return "нет данных"
     minutes = int(delta.total_seconds() // 60)
     hours, minutes = divmod(minutes, 60)
-    return f"{hours} ч {minutes:02d} мин" if hours else f"{minutes} мин"
+    return f"{hours}ч {minutes:02d}м" if hours else f"{minutes}м"
 
 
 def is_quiet_hours(timezone_name: str, now: datetime | None = None) -> bool:

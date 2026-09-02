@@ -311,9 +311,9 @@ def test_history_record_card_keeps_position_and_duration():
         sleep_type=SleepType.DAY.value,
     )
     card = _record_text(log, 12, "UTC")
-    assert "12. 💤" in card
-    assert "17.08 10:00 — 11:15" in card
-    assert "1 ч 15 мин" in card
+    assert "12. <code>" in card
+    assert "17.08 10:00 – 11:15" in card
+    assert "1ч 15м" in card
 
 
 def test_update_detects_stale_parent_edit_and_reclassifies_sleep_type(tmp_path):

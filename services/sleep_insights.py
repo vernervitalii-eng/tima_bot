@@ -39,24 +39,21 @@ def build_wake_widget(
     local_start = to_local(window_start, timezone_name)
     local_end = to_local(window_end, timezone_name)
     local_ritual = to_local(ritual_at, timezone_name)
-    source = "Привычное ВБ по истории" if history_samples >= 3 else "Возрастной ориентир ВБ"
+    source = "по истории сна" if history_samples >= 3 else "по возрастному ориентиру"
     until_window = max(window_start - wake_at, timedelta())
     previous_line = (
-        f"• Предыдущее ВБ: <code>{format_duration(previous_wake)}</code>\n"
+        f"Предыдущее бодрствование: <code>{format_duration(previous_wake)}</code>\n"
         if previous_wake is not None else ""
     )
     return (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"⚡ <b>ПОДЪЁМ ЗАФИКСИРОВАН • {local_wake:%H:%M}</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👶 {escape(child_name)}\n"
-        f"• Текущий сон: <code>{format_duration(sleep_duration)}</code>\n"
+        f"<b>Подъём зафиксирован в <code>{local_wake:%H:%M}</code></b>\n"
+        f"<i>{escape(child_name)}</i>\n\n"
+        f"Сон длился: <code>{format_duration(sleep_duration)}</code>\n"
         f"{previous_line}"
-        f"• {source}: <code>~{format_duration(timedelta(minutes=typical_minutes))}</code>\n\n"
-        "🎯 <b>Окно в следующий сон</b>\n"
-        f"<code>{local_start:%H:%M} — {local_end:%H:%M}</code> "
-        f"<i>(через {format_duration(until_window)})</i>\n"
-        f"💡 Начните спокойные ритуалы в <code>{local_ritual:%H:%M}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"<i>Запись добавил(а): {escape(author)}</i>"
+        f"Обычное ВБ: <code>~{format_duration(timedelta(minutes=typical_minutes))}</code> "
+        f"<i>{source}</i>\n\n"
+        f"Окно следующего сна: <code>~{local_start:%H:%M} – {local_end:%H:%M}</code>\n"
+        f"<i>Примерно через {format_duration(until_window)}</i>\n"
+        f"Ритуалы: <code>{local_ritual:%H:%M}</code>\n\n"
+        f"<i>Добавил(а): {escape(author)}</i>"
     )

@@ -53,16 +53,16 @@ async def statistics(message: Message) -> None:
             sleep_comparison = "в пределах суточного ориентира"
 
         text = (
-            f"📊 Сегодня — {user.child.name}\n\n"
-            f"Дневной сон: {format_duration(day_sleep)}\n"
-            f"Дневных снов: {day_count}\n"
-            f"Весь сон с начала суток: {format_duration(total_sleep)} ({sleep_comparison})\n"
-            f"Текущее ВБ: {'ребёнок спит' if active else format_duration(wake_duration)}\n\n"
+            f"<b>Сегодня · {user.child.name}</b>\n\n"
+            f"• Дневной сон: <code>{format_duration(day_sleep)}</code>\n"
+            f"• Дневных снов: <code>{day_count}</code>\n"
+            f"• Всего сна: <code>{format_duration(total_sleep)}</code> ({sleep_comparison})\n"
+            f"• Сейчас: {'ребёнок спит' if active else f'<code>{format_duration(wake_duration)}</code> бодрствует'}\n\n"
             f"Возраст: {months} мес. {days} дн.\n"
-            f"Норма ВБ: {format_duration(timedelta(minutes=norm.wake_min))} – "
-            f"{format_duration(timedelta(minutes=norm.wake_max))}\n"
-            f"Ориентир сна за сутки: {norm.sleep_min:g}–{norm.sleep_max:g} ч.\n\n"
-            f"💡 {recommendation}"
+            f"Ориентир бодрствования: <code>{format_duration(timedelta(minutes=norm.wake_min))} – "
+            f"{format_duration(timedelta(minutes=norm.wake_max))}</code>\n"
+            f"Сон за сутки: <code>{norm.sleep_min:g}–{norm.sleep_max:g}ч</code>\n\n"
+            f"{recommendation}"
         )
         silent = user.child.silent_mode and is_quiet_hours(user.child.timezone)
     await message.answer(text, disable_notification=silent)

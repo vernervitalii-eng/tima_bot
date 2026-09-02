@@ -226,7 +226,7 @@ def test_plans_payloads_keyboards_and_premium_menu_are_consistent():
     assert parse_invoice_payload("broken") is None
 
     labels = [button.text for row in main_keyboard(False).keyboard for button in row]
-    assert labels.count("⭐️ Premium подписка") == 1
+    assert labels.count("⭐️ Премиум") == 1
     onboarding_labels = [
         button.text for row in main_keyboard(None).keyboard for button in row
     ]

@@ -65,9 +65,9 @@ async def seed_data(message: Message, command: CommandObject) -> None:
             f"• {warning[:180]}" for warning in parsed.warnings[:5]
         )
     await message.answer(
-        f"✅ <b>История августа загружена для {child_name}</b>\n\n"
-        f"💤 Добавлено снов: <code>{stats['sleep_added']}</code>\n"
-        f"↩️ Уже были в базе: <code>{stats['sleep_skipped']}</code>\n"
+        f"<b>История августа загружена · {child_name}</b>\n\n"
+        f"Добавлено снов: <code>{stats['sleep_added']}</code>\n"
+        f"Уже были в базе: <code>{stats['sleep_skipped']}</code>\n"
         f"Повторный запуск безопасен и не создаёт дубликаты.{warning_text}"
     )
 

@@ -11,8 +11,11 @@ from services.time_utils import format_duration, to_local, utc_now
 
 
 RU_MONTHS = (
-    "ЯНВАРЯ", "ФЕВРАЛЯ", "МАРТА", "АПРЕЛЯ", "МАЯ", "ИЮНЯ",
-    "ИЮЛЯ", "АВГУСТА", "СЕНТЯБРЯ", "ОКТЯБРЯ", "НОЯБРЯ", "ДЕКАБРЯ",
+    "января", "февраля", "марта", "апреля", "мая", "июня",
+    "июля", "августа", "сентября", "октября", "ноября", "декабря",
+)
+RU_WEEKDAYS = (
+    "понедельник", "вторник", "среда", "четверг", "пятница", "суббота", "воскресенье",
 )
 
 
@@ -34,13 +37,17 @@ def local_date_bounds_utc(day: date, timezone_name: str) -> tuple[datetime, date
 
 
 def _date_title(day: date) -> str:
-    return f"{day.day} {RU_MONTHS[day.month - 1]}"
+    return f"{day.day} {RU_MONTHS[day.month - 1]}, {RU_WEEKDAYS[day.weekday()]}"
 
 
-def _progress_bar(duration: timedelta, target_minutes: int) -> str:
-    minutes = max(int(duration.total_seconds() // 60), 0)
-    filled = min(10, max(0, round(minutes / max(target_minutes, 1) * 8)))
-    return "▓" * filled + "░" * (10 - filled)
+def _sleep_count_label(count: int) -> str:
+    if count % 10 == 1 and count % 100 != 11:
+        word = "сон"
+    elif count % 10 in {2, 3, 4} and count % 100 not in {12, 13, 14}:
+        word = "сна"
+    else:
+        word = "снов"
+    return f"{count} {word}"
 
 
 def build_day_timeline(
@@ -51,6 +58,7 @@ def build_day_timeline(
     wake_target_minutes: int,
     now: datetime | None = None,
 ) -> str:
+    _ = wake_target_minutes  # Параметр сохранён для совместимости публичного API.
     now = now or utc_now()
     start_utc, end_utc = local_date_bounds_utc(selected_date, timezone_name)
     today = to_local(now, timezone_name).date()
@@ -81,14 +89,14 @@ def build_day_timeline(
                 events.append(TimelineEvent(
                     local_end,
                     20,
-                    f"🌅 <code>{local_end:%H:%M}</code>  <b>Подъём</b>\n"
-                    f"└ 🌙 <i>Ночной сон: {format_duration(full_duration)}</i>",
+                    f"<code>{local_end:%H:%M}</code> · Подъём "
+                    f"<i>(ночь: <code>{format_duration(full_duration)}</code>)</i>",
                 ))
             if local_start.date() == selected_date:
                 events.append(TimelineEvent(
                     local_start,
                     20,
-                    f"🌙 <code>{local_start:%H:%M}</code>  <b>Укладывание в ночь</b>",
+                    f"<code>{local_start:%H:%M}</code> · Укладывание на ночь",
                 ))
             continue
 
@@ -106,8 +114,8 @@ def build_day_timeline(
             events.append(TimelineEvent(
                 visible_start,
                 20,
-                f"💤 <code>{visible_start:%H:%M} — {end_label}</code>  <b>Дневной сон №{number}</b>\n"
-                f"└ ⏳ <i>Длительность: {format_duration(full_duration)}</i>",
+                f"<code>{visible_start:%H:%M} – {end_label}</code> · Дневной сон {number} "
+                f"<i>(<code>{format_duration(full_duration)}</code>)</i>",
             ))
 
     wake_intervals: list[timedelta] = []
@@ -122,12 +130,6 @@ def build_day_timeline(
         if duration > timedelta(hours=12):
             continue
         wake_intervals.append(duration)
-        events.append(TimelineEvent(
-            local_next,
-            10,
-            f"⏱ <code>ВБ: {format_duration(duration)}</code> "
-            f"<code>{_progress_bar(duration, wake_target_minutes)}</code>",
-        ))
 
     active = next((item for item in reversed(ordered_logs) if item.end_time is None), None)
     last_completed = next((item for item in reversed(ordered_logs) if item.end_time is not None), None)
@@ -138,8 +140,7 @@ def build_day_timeline(
             events.append(TimelineEvent(
                 to_local(now, timezone_name),
                 90,
-                f"⚡ <code>Текущее ВБ: {format_duration(current_wake)}</code> "
-                f"<code>{_progress_bar(current_wake, wake_target_minutes)}</code>",
+                f"Сейчас · Бодрствует <code>{format_duration(current_wake)}</code>",
             ))
 
     events.sort(key=lambda item: (item.at, item.priority))
@@ -148,26 +149,22 @@ def build_day_timeline(
     if len(events) > len(visible_events):
         blocks.append(f"… <i>Ещё событий: {len(events) - len(visible_events)}</i>")
     if not blocks:
-        blocks.append("🫧 <i>За этот день пока нет записей.</i>")
+        blocks.append("<i>За этот день пока нет записей.</i>")
 
     average_wake = (
         timedelta(seconds=mean(item.total_seconds() for item in wake_intervals))
         if wake_intervals else None
     )
     summary = (
-        "────────────────────\n"
-        "📊 <b>ИТОГО</b>\n"
-        f"• 💤 Дневной сон: <code>{format_duration(day_sleep)}</code> ({day_count} снов)\n"
-        f"• ⏱ Среднее ВБ: <code>{format_duration(average_wake)}</code>\n"
-        f"• 🔋 Всего сна за сутки: <code>{format_duration(total_sleep)}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━"
+        "<b>Итог за день</b>\n"
+        f"• Дневной сон: <code>{format_duration(day_sleep)}</code> ({_sleep_count_label(day_count)})\n"
+        f"• Среднее бодрствование: <code>{format_duration(average_wake)}</code>\n"
+        f"• Всего сна: <code>{format_duration(total_sleep)}</code>"
     )
     return (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"👶 <b>ХРОНОЛОГИЯ • {_date_title(selected_date)}</b>\n"
-        f"<code>{escape(child_name)}</code>\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        + "\n\n".join(blocks)
+        f"<b>{_date_title(selected_date)}</b>\n"
+        f"<i>{escape(child_name)}</i>\n\n"
+        + "\n".join(blocks)
         + "\n\n"
         + summary
     )
