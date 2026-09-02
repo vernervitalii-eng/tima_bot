@@ -21,6 +21,7 @@ from services.ai_analyst import (
     trim_dialog_history,
 )
 from services.live_status import build_live_status_view
+from services.subscription import require_premium_access
 from services.time_utils import age_parts, to_local, utc_now
 
 
@@ -63,6 +64,8 @@ async def _finish_dialog(
 @router.message(Command("ask_ai"))
 @router.message(F.text == "💬 Чат с ИИ-консультантом")
 async def enter_ai_dialog(message: Message, state: FSMContext, settings: Settings) -> None:
+    if not await require_premium_access(message, message.from_user.id):
+        return
     if not settings.gemini_api_key:
         await message.answer(
             "🧠 ИИ-консультант пока не настроен: отсутствует <code>GEMINI_API_KEY</code>."
@@ -117,6 +120,9 @@ async def ai_dialog_question(
     state: FSMContext,
     settings: Settings,
 ) -> None:
+    if not await require_premium_access(message, message.from_user.id):
+        await _finish_dialog(message, message.from_user.id, state)
+        return
     question = (message.text or "").strip()
     if len(question) < 2:
         await message.answer("Напишите вопрос чуть подробнее.", reply_markup=ai_dialog_exit_keyboard())

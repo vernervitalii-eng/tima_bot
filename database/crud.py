@@ -11,7 +11,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from database.models import AIRoutineSnapshot, Child, SleepLog, SleepType, User, UserRole
+from database.models import (
+    AIRoutineSnapshot,
+    Child,
+    SleepLog,
+    SleepType,
+    SubscriptionPayment,
+    User,
+    UserRole,
+)
 
 
 async def get_user(session: AsyncSession, telegram_id: int) -> User | None:
@@ -251,6 +259,60 @@ async def get_ai_routine_snapshot(
     return await session.scalar(
         select(AIRoutineSnapshot).where(AIRoutineSnapshot.child_id == child_id)
     )
+
+
+async def activate_subscription(
+    session: AsyncSession,
+    user: User,
+    *,
+    plan_code: str,
+    days: int,
+    stars: int,
+    currency: str,
+    telegram_payment_charge_id: str,
+    invoice_payload: str,
+    paid_at: datetime,
+) -> tuple[datetime, bool]:
+    """Продлевает Premium ровно один раз для каждого Telegram charge ID."""
+    existing = await session.scalar(
+        select(SubscriptionPayment).where(
+            SubscriptionPayment.telegram_payment_charge_id
+            == telegram_payment_charge_id
+        )
+    )
+    if existing is not None:
+        return existing.subscription_end_date, False
+    try:
+        async with session.begin_nested():
+            base = user.subscription_end_date
+            if base is None or base < paid_at:
+                base = paid_at
+            subscription_end = base + timedelta(days=days)
+            user.subscription_end_date = subscription_end
+            session.add(SubscriptionPayment(
+                user_id=user.id,
+                telegram_payment_charge_id=telegram_payment_charge_id,
+                plan_code=plan_code,
+                stars=stars,
+                currency=currency,
+                invoice_payload=invoice_payload,
+                paid_at=paid_at,
+                subscription_end_date=subscription_end,
+            ))
+            await session.flush()
+        return subscription_end, True
+    except IntegrityError:
+        # Повторно доставленный successful_payment не должен продлевать срок дважды.
+        existing = await session.scalar(
+            select(SubscriptionPayment).where(
+                SubscriptionPayment.telegram_payment_charge_id
+                == telegram_payment_charge_id
+            )
+        )
+        if existing is None:
+            raise
+        await session.refresh(user)
+        return existing.subscription_end_date, False
 
 
 async def seed_monthly_data(

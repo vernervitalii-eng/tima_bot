@@ -58,6 +58,15 @@ async def _migrate_sqlite(connection) -> None:
     user_columns = await columns("users")
     if "display_name" not in user_columns:
         await connection.execute(text("ALTER TABLE users ADD COLUMN display_name VARCHAR(80) NOT NULL DEFAULT 'Член семьи'"))
+    if "trial_end_date" not in user_columns:
+        await connection.execute(text("ALTER TABLE users ADD COLUMN trial_end_date DATETIME"))
+    if "subscription_end_date" not in user_columns:
+        await connection.execute(text("ALTER TABLE users ADD COLUMN subscription_end_date DATETIME"))
+    # Существующим родителям один раз выдаётся такой же трёхдневный триал.
+    await connection.execute(text(
+        "UPDATE users SET trial_end_date = datetime('now', '+3 days') "
+        "WHERE trial_end_date IS NULL"
+    ))
     sleep_columns = await columns("sleep_logs")
     if "ended_by_user_id" not in sleep_columns:
         await connection.execute(text("ALTER TABLE sleep_logs ADD COLUMN ended_by_user_id INTEGER REFERENCES users(id)"))
@@ -74,6 +83,16 @@ async def _migrate_postgresql(connection) -> None:
     ))
     await connection.execute(text(
         "ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name VARCHAR(80) NOT NULL DEFAULT 'Член семьи'"
+    ))
+    await connection.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS trial_end_date TIMESTAMP WITHOUT TIME ZONE"
+    ))
+    await connection.execute(text(
+        "ALTER TABLE users ADD COLUMN IF NOT EXISTS subscription_end_date TIMESTAMP WITHOUT TIME ZONE"
+    ))
+    await connection.execute(text(
+        "UPDATE users SET trial_end_date = (CURRENT_TIMESTAMP AT TIME ZONE 'UTC') + INTERVAL '3 days' "
+        "WHERE trial_end_date IS NULL"
     ))
     await connection.execute(text(
         "ALTER TABLE sleep_logs ADD COLUMN IF NOT EXISTS ended_by_user_id INTEGER REFERENCES users(id)"

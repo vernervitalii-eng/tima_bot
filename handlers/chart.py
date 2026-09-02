@@ -12,17 +12,20 @@ from database import crud
 from database.session import db_session
 from keyboards.inline import chart_period_keyboard
 from services.norms import norm_for_age
+from services.subscription import require_premium_access
 from services.time_utils import age_parts, local_day_start_utc, to_local, utc_now
 
 
 router = Router(name="chart")
 
 
-async def _send_chart(message: Message, days: int) -> None:
+async def _send_chart(message: Message, telegram_id: int, days: int) -> None:
+    if not await require_premium_access(message, telegram_id):
+        return
     days = 14 if days >= 14 else 7
     now = utc_now()
     async with db_session() as session:
-        user = await crud.get_user(session, message.from_user.id)
+        user = await crud.get_user(session, telegram_id)
         if not user:
             await message.answer("Сначала выполните /start.")
             return
@@ -57,18 +60,17 @@ async def _send_chart(message: Message, days: int) -> None:
 @router.message(Command("chart"))
 async def chart_command(message: Message, command: CommandObject) -> None:
     raw_days = (command.args or "7").strip()
-    await _send_chart(message, 14 if raw_days == "14" else 7)
+    await _send_chart(message, message.from_user.id, 14 if raw_days == "14" else 7)
 
 
 @router.message(F.text == "📊 График снов (Неделя)")
 @router.message(F.text == "📊 График снов")
 async def chart_button(message: Message) -> None:
-    await _send_chart(message, 7)
+    await _send_chart(message, message.from_user.id, 7)
 
 
 @router.callback_query(F.data.regexp(r"^chart:(7|14)$"))
 async def chart_period(callback: CallbackQuery) -> None:
     await callback.answer()
     days = int(callback.data.rsplit(":", 1)[1])
-    await _send_chart(callback.message, days)
-
+    await _send_chart(callback.message, callback.from_user.id, days)

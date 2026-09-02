@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
 
-from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import BigInteger, Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -13,6 +13,10 @@ class Base(DeclarativeBase):
 
 def utc_now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def trial_end_default() -> datetime:
+    return utc_now_naive() + timedelta(days=3)
 
 
 class UserRole(StrEnum):
@@ -48,8 +52,26 @@ class User(Base):
     child_id: Mapped[int] = mapped_column(ForeignKey("children.id", ondelete="CASCADE"), index=True)
     role: Mapped[str] = mapped_column(String(16), default=UserRole.MEMBER.value)
     display_name: Mapped[str] = mapped_column(String(80), default="Член семьи")
+    trial_end_date: Mapped[datetime | None] = mapped_column(
+        DateTime,
+        default=trial_end_default,
+        nullable=True,
+    )
+    subscription_end_date: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     child: Mapped[Child] = relationship(back_populates="users")
+
+    @property
+    def is_premium(self) -> bool:
+        """Триал и оплаченный доступ вычисляются по времени, без устаревающего флага в БД."""
+        now = utc_now_naive()
+        return bool(
+            (self.trial_end_date is not None and self.trial_end_date > now)
+            or (
+                self.subscription_end_date is not None
+                and self.subscription_end_date > now
+            )
+        )
 
 
 class SleepLog(Base):
@@ -90,3 +112,26 @@ class AIRoutineSnapshot(Base):
     )
     payload_json: Mapped[str] = mapped_column(Text)
     generated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+
+
+class SubscriptionPayment(Base):
+    """Неизменяемый журнал Telegram Stars для идемпотентной активации и возвратов."""
+
+    __tablename__ = "subscription_payments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"),
+        index=True,
+    )
+    telegram_payment_charge_id: Mapped[str] = mapped_column(
+        String(128),
+        unique=True,
+        index=True,
+    )
+    plan_code: Mapped[str] = mapped_column(String(16))
+    stars: Mapped[int] = mapped_column(Integer)
+    currency: Mapped[str] = mapped_column(String(3), default="XTR")
+    invoice_payload: Mapped[str] = mapped_column(String(128))
+    paid_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now_naive)
+    subscription_end_date: Mapped[datetime] = mapped_column(DateTime)

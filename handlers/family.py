@@ -18,7 +18,7 @@ from keyboards.inline import (
 )
 from handlers.states import InviteFamily, JoinFamily
 from services.scheduler import cancel_child_jobs
-from services.time_utils import age_parts, is_quiet_hours
+from services.time_utils import age_parts, is_quiet_hours, to_local
 
 router = Router(name="family")
 
@@ -82,9 +82,13 @@ async def complete_join(message: Message, state: FSMContext, display_name: str, 
             return
         name = user.child.name
         sleeping = await crud.active_sleep(session, user.child_id) is not None
+        trial_end = user.trial_end_date
+        timezone_name = user.child.timezone
     await state.clear()
     await message.answer(
-        f"Вы присоединились к профилю {name} как «{display_name}».",
+        f"Вы присоединились к профилю {name} как «{display_name}».\n"
+        f"🎁 Premium-триал активен до: "
+        f"<code>{to_local(trial_end, timezone_name):%d.%m.%Y %H:%M}</code>.",
         reply_markup=main_keyboard(sleeping),
     )
 

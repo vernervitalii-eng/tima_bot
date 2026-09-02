@@ -18,6 +18,7 @@ from services.ai_analyst import (
     remember_base_routine,
 )
 from services.time_utils import age_parts, to_local, utc_now
+from services.subscription import require_premium_access
 
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,8 @@ router = Router(name="ai_routine")
 
 
 async def _run_analysis(message: Message, telegram_id: int, settings: Settings) -> None:
+    if not await require_premium_access(message, telegram_id):
+        return
     if not settings.gemini_api_key:
         await message.answer(
             "🧠 <b>AI-анализ пока не настроен</b>\n\n"

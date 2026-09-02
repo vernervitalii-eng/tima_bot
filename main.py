@@ -37,6 +37,16 @@ async def main() -> None:
     await init_db(settings.database_url)
     bot = Bot(settings.token, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     try:
+        await bot.set_my_name("BabyRhythm AI • Умный режим и сон")
+        await bot.set_my_description(
+            "Умный трекер сна малыша, расчёт ВБ, AI-анализ режима и персональный чат-сомнолог."
+        )
+    except Exception:
+        logging.getLogger(__name__).warning(
+            "Не удалось обновить название BabyRhythm AI; запуск продолжится.",
+            exc_info=True,
+        )
+    try:
         await bot.set_my_commands([
             BotCommand(command="start", description="Открыть главное меню"),
             BotCommand(command="status", description="Текущий статус ребёнка"),
@@ -46,6 +56,9 @@ async def main() -> None:
             BotCommand(command="chart", description="График снов"),
             BotCommand(command="history", description="История записей"),
             BotCommand(command="add_sleep", description="Добавить пропущенный сон"),
+            BotCommand(command="subscribe", description="Premium через Telegram Stars"),
+            BotCommand(command="terms", description="Условия Premium"),
+            BotCommand(command="paysupport", description="Поддержка по оплате"),
         ])
     except Exception:
         logging.getLogger(__name__).warning(

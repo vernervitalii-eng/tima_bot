@@ -1,4 +1,5 @@
 from datetime import date, timedelta
+from collections.abc import Iterable
 
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
@@ -118,6 +119,16 @@ def ai_refresh_keyboard() -> InlineKeyboardMarkup:
 def ai_dialog_exit_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="❌ Выйти из чата", callback_data="ai:dialog:exit")],
+    ])
+
+
+def premium_tariffs_keyboard(plans: Iterable[object]) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text=plan.button_label,
+            callback_data=f"premium:buy:{plan.code}",
+        )]
+        for plan in plans
     ])
 
 

@@ -12,9 +12,29 @@ from handlers.states import Onboarding
 from keyboards.main import main_keyboard
 from keyboards.inline import start_choice_keyboard
 from services.live_status import build_live_status_view
-from services.time_utils import age_parts, parse_birth_date
+from services.subscription import BRAND_NAME, premium_status_text
+from services.time_utils import age_parts, parse_birth_date, to_local
 
 router = Router(name="common")
+
+
+WELCOME_CARD = (
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    f"👶 <b>{BRAND_NAME} • Персональный консультант по сну</b>\n"
+    "━━━━━━━━━━━━━━━━━━━━\n"
+    "Добро пожаловать! Этот бот помогает родителям наладить стабильный режим "
+    "сна ребёнка без слёз и переутомлений.\n\n"
+    "✨ <b>Что умеет бот:</b>\n"
+    "• 💤 <b>Умный трекинг:</b> сон и подъём в один клик или текстом.\n"
+    "• ⏱ <b>Контроль бодрствования:</b> расчёт ВБ и длительности.\n"
+    "• 🎯 <b>Смарт-окна сна:</b> прогноз следующего укладывания.\n"
+    "• 🧠 <b>AI-Сомнолог:</b> анализ биоритмов и график дня.\n"
+    "• 💬 <b>Диалог с экспертом:</b> вопросы и корректировка режима.\n"
+    "• 📊 <b>Отчёты:</b> диаграммы и хронология суток.\n\n"
+    "🎁 <b>Вам доступно 3 дня полного Premium-доступа!</b>\n"
+    "Триал начнётся автоматически после создания или подключения профиля.\n"
+    "━━━━━━━━━━━━━━━━━━━━"
+)
 
 
 @router.message(CommandStart())
@@ -26,13 +46,20 @@ async def start(message: Message, state: FSMContext) -> None:
             months, days = age_parts(user.child.birth_date)
             view = await build_live_status_view(session, user.child)
             await message.answer(
-                f"С возвращением! {user.child.name}: {months} мес. {days} дн.\n\n{view.text}",
+                f"👶 <b>{BRAND_NAME}</b>\n"
+                f"С возвращением! {user.child.name}: {months} мес. {days} дн.\n"
+                f"{premium_status_text(user, timezone_name=user.child.timezone)}\n\n"
+                f"{view.text}",
                 reply_markup=main_keyboard(view.is_sleeping),
                 disable_notification=view.silent,
             )
             return
     await message.answer(
-        "Что вы хотите сделать?",
+        WELCOME_CARD,
+        reply_markup=main_keyboard(None),
+    )
+    await message.answer(
+        "Для сохранения данных сначала создайте семейный профиль или подключитесь к существующему:",
         reply_markup=start_choice_keyboard(),
     )
 
@@ -76,10 +103,13 @@ async def onboarding_birth(message: Message, state: FSMContext, settings: Settin
             return
         user = await crud.create_family(session, message.from_user.id, data["name"], birth_date, settings.timezone)
         code, child_name = user.child.invite_code, user.child.name
+        trial_end = user.trial_end_date
     await state.clear()
     months, days = age_parts(birth_date)
     await message.answer(
         f"Готово! Профиль {child_name} создан. Возраст: {months} мес. {days} дн.\n\n"
+        f"🎁 Premium-триал активен до: "
+        f"<code>{to_local(trial_end, settings.timezone):%d.%m.%Y %H:%M}</code>\n\n"
         f"Семейный код: <code>{code}</code>\nДругой взрослый может выполнить: <code>/join {code}</code>",
         reply_markup=main_keyboard(False),
     )

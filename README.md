@@ -1,4 +1,4 @@
-# Telegram-бот «Сон ребёнка»
+# BabyRhythm AI • Умный режим и сон
 
 Python 3.11+, aiogram 3, async SQLAlchemy, SQLite/PostgreSQL и APScheduler.
 
@@ -30,7 +30,17 @@ python bot.py
 
 URL вида `postgres://...` или `postgresql://...` автоматически преобразуется для async-драйвера. Пароль базы нельзя добавлять в GitHub или `.env.example`.
 
-Команды: `/start`, `/join CODE`, `/status`, `/day`, `/history`, `/list`, `/add_sleep`, `/chart [7|14]`, `/ai_routine`, `/ask_ai`, `/seed_data`, `/backup`, `/reset`, `/cancel`.
+Команды: `/start`, `/join CODE`, `/status`, `/day`, `/history`, `/list`, `/add_sleep`, `/chart [7|14]`, `/ai_routine`, `/ask_ai`, `/subscribe`, `/terms`, `/paysupport`, `/seed_data`, `/backup`, `/reset`, `/cancel`.
+
+## Freemium и Telegram Stars
+
+- Каждый новый или существующий пользователь один раз получает 3 дня Premium. Поля `trial_end_date` и `subscription_end_date` добавляются безопасной миграцией; повторный запуск не сбрасывает срок.
+- Бесплатно навсегда доступны трекинг сна, длительность, ВБ и сегодняшняя хронология `/day`.
+- Premium требуется для `/ai_routine`, `/ask_ai` и `/chart`.
+- `/subscribe` открывает тарифы на 30, 90 и 180 дней за 500, 1250 и 2200 Telegram Stars.
+- Инвойсы используют цифровую валюту `XTR` и ровно одну позицию `LabeledPrice`. Provider token для Telegram Stars не нужен.
+- Доступ продлевается только после `successful_payment`. Уникальный `telegram_payment_charge_id` сохраняется в `subscription_payments`, поэтому повторная доставка события не удваивает срок.
+- Условия доступны через `/terms`, запрос владельцу по спорному платежу — через `/paysupport описание проблемы`.
 
 ## Проверка проекта
 
