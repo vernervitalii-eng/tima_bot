@@ -18,6 +18,7 @@ from services.subscription import (
     BRAND_NAME,
     PLANS_BY_CODE,
     PREMIUM_PLANS,
+    is_admin_user,
     make_invoice_payload,
     parse_invoice_payload,
     premium_storefront_text,
@@ -35,9 +36,14 @@ async def premium_storefront(message: Message) -> None:
     async with db_session() as session:
         user = await crud.get_user(session, message.from_user.id)
         timezone_name = user.child.timezone if user is not None else None
+    is_creator = is_admin_user(message.from_user.id)
     await message.answer(
-        premium_storefront_text(user, timezone_name),
-        reply_markup=premium_tariffs_keyboard(PREMIUM_PLANS),
+        premium_storefront_text(user, timezone_name, message.from_user.id),
+        reply_markup=(
+            None
+            if is_creator
+            else premium_tariffs_keyboard(PREMIUM_PLANS)
+        ),
     )
 
 
@@ -48,12 +54,17 @@ async def premium_buy(callback: CallbackQuery) -> None:
     if plan is None:
         await callback.message.answer("Тариф больше не доступен. Выполните /subscribe.")
         return
+    if is_admin_user(callback.from_user.id):
+        await callback.message.answer(
+            "👑 <b>Статус: Создатель бота</b>\n"
+            "Платёж не требуется: пожизненный безлимитный доступ уже активен."
+        )
+        return
     async with db_session() as session:
         user = await crud.get_user(session, callback.from_user.id)
     if user is None:
         await callback.message.answer("Сначала выполните /start и создайте профиль ребёнка.")
         return
-
     await callback.bot.send_invoice(
         chat_id=callback.from_user.id,
         title=f"{BRAND_NAME} Premium • {plan.months} мес.",
@@ -173,7 +184,7 @@ async def payment_support(
         return
 
     notified = 0
-    for admin_id in settings.allowed_ids:
+    for admin_id in settings.admin_ids:
         if admin_id == message.from_user.id:
             continue
         try:
@@ -191,3 +202,75 @@ async def payment_support(
         if notified
         else "✅ Запрос принят. Сохраните квитанцию Telegram до ответа владельца бота."
     )
+
+
+@router.message(Command("give_premium"))
+async def give_premium(
+    message: Message,
+    command: CommandObject,
+    settings: Settings,
+    bot: Bot,
+) -> None:
+    if message.from_user.id not in settings.admin_ids:
+        await message.answer("⛔️ Эта команда доступна только создателям бота.")
+        return
+
+    parts = (command.args or "").split()
+    if len(parts) != 2 or not all(value.isdigit() for value in parts):
+        await message.answer(
+            "Использование: <code>/give_premium USER_ID DAYS</code>\n"
+            "Пример: <code>/give_premium 123456789 30</code>"
+        )
+        return
+
+    target_id, days = map(int, parts)
+    if target_id <= 0 or not 1 <= days <= 36500:
+        await message.answer("USER_ID должен быть положительным, DAYS — от 1 до 36500.")
+        return
+    if target_id in settings.admin_ids:
+        await message.answer(
+            "👑 Этот пользователь является создателем/администратором и уже имеет "
+            "пожизненный Premium."
+        )
+        return
+
+    async with db_session() as session:
+        user = await crud.get_user(session, target_id)
+        if user is None:
+            await message.answer(
+                "Пользователь не найден. Сначала он должен выполнить /start и "
+                "создать профиль или присоединиться к семье."
+            )
+            return
+        subscription_end = await crud.grant_premium(
+            session,
+            user,
+            days=days,
+            granted_at=utc_now(),
+        )
+        timezone_name = user.child.timezone
+        sleeping = await crud.active_sleep(session, user.child_id) is not None
+
+    local_end = to_local(subscription_end, timezone_name)
+    await message.answer(
+        "✅ <b>Premium выдан вручную</b>\n"
+        f"Пользователь: <code>{target_id}</code>\n"
+        f"Срок: <code>{days} дн.</code>\n"
+        f"Действует до: <code>{local_end:%d.%m.%Y %H:%M}</code>"
+    )
+    if target_id == message.from_user.id:
+        return
+    try:
+        await bot.send_message(
+            target_id,
+            "🎁 <b>Вам выдан Premium-доступ BabyRhythm AI</b>\n"
+            f"Срок: <code>{days} дн.</code>\n"
+            f"Действует до: <code>{local_end:%d.%m.%Y %H:%M}</code>",
+            reply_markup=main_keyboard(sleeping),
+        )
+    except Exception:
+        logger.warning(
+            "Premium выдан, но уведомление пользователю %s не доставлено",
+            target_id,
+            exc_info=True,
+        )

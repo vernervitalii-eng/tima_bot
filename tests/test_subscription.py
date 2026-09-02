@@ -6,6 +6,7 @@ from pathlib import Path
 
 from sqlalchemy import func, select, text
 
+from config import ADMIN_IDS, BUILTIN_ADMIN_IDS, parse_admin_ids
 from database import crud
 from database.models import SubscriptionPayment, User
 from database.session import close_db, db_session, init_db
@@ -14,9 +15,12 @@ from keyboards.main import main_keyboard
 from services.subscription import (
     PREMIUM_PLANS,
     has_premium_access,
+    is_admin_user,
     make_invoice_payload,
     parse_invoice_payload,
     premium_deadline,
+    premium_status_text,
+    premium_storefront_text,
 )
 from services.time_utils import utc_now
 
@@ -152,6 +156,57 @@ def test_trial_payment_extension_and_charge_idempotency(tmp_path):
     asyncio.run(scenario())
 
 
+def test_creators_always_have_lifetime_premium():
+    assert BUILTIN_ADMIN_IDS == frozenset({303225689, 324310407})
+    assert BUILTIN_ADMIN_IDS <= ADMIN_IDS
+    for telegram_id in BUILTIN_ADMIN_IDS:
+        expired_user = User(
+            telegram_id=telegram_id,
+            child_id=1,
+            trial_end_date=datetime(2020, 1, 1),
+            subscription_end_date=None,
+        )
+        assert is_admin_user(telegram_id)
+        assert has_premium_access(telegram_id)
+        assert has_premium_access(expired_user, datetime(2030, 1, 1))
+        assert "Создатель бота" in premium_status_text(expired_user)
+        assert "Пожизненный" in premium_status_text(expired_user)
+        assert "Создатель бота" in premium_storefront_text(telegram_id=telegram_id)
+    assert parse_admin_ids(" 111,invalid,222,,0 ") == frozenset({111, 222})
+
+
+def test_manual_premium_grant_extends_existing_access(tmp_path):
+    async def scenario() -> None:
+        url = f"sqlite+aiosqlite:///{(tmp_path / 'manual-premium.db').as_posix()}"
+        await init_db(url)
+        try:
+            now = datetime(2026, 9, 2, 12, 0)
+            async with db_session() as session:
+                user = await crud.create_family(
+                    session,
+                    770004,
+                    "Ручная выдача",
+                    date(2025, 1, 1),
+                    "UTC",
+                )
+                user.subscription_end_date = now + timedelta(days=10)
+                expected_user_id = user.id
+
+            async with db_session() as session:
+                user = await session.get(User, expected_user_id)
+                granted_until = await crud.grant_premium(
+                    session,
+                    user,
+                    days=5,
+                    granted_at=now,
+                )
+                assert granted_until == now + timedelta(days=15)
+        finally:
+            await close_db()
+
+    asyncio.run(scenario())
+
+
 def test_plans_payloads_keyboards_and_premium_menu_are_consistent():
     assert [(plan.days, plan.stars) for plan in PREMIUM_PLANS] == [
         (30, 500),
@@ -197,6 +252,8 @@ def test_payment_and_premium_handlers_are_registered_safely():
     assert "F.successful_payment" in source
     assert 'currency="XTR"' in source
     assert "telegram_payment_charge_id" in source
+    assert 'Command("give_premium")' in source
+    assert "settings.admin_ids" in source
 
 
 def test_premium_features_use_access_gate():

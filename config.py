@@ -18,6 +18,22 @@ DB_DIR = DB_DIR.resolve()
 DEFAULT_DB_PATH = DB_DIR / "baby_tracker.db"
 LEGACY_DB_PATH = PROJECT_DIR / "sleep_tracker.db"
 
+# Создатели BabyRhythm AI всегда имеют административный и Premium-доступ.
+# Дополнительные администраторы можно задать в Render/.env через ADMIN_IDS.
+BUILTIN_ADMIN_IDS = frozenset({303225689, 324310407})
+
+
+def parse_admin_ids(raw_value: str) -> frozenset[int]:
+    return frozenset(
+        int(value.strip())
+        for value in raw_value.split(",")
+        if value.strip().isdigit() and int(value.strip()) > 0
+    )
+
+
+ENV_ADMIN_IDS = parse_admin_ids(os.getenv("ADMIN_IDS", ""))
+ADMIN_IDS = BUILTIN_ADMIN_IDS | ENV_ADMIN_IDS
+
 
 @dataclass(frozen=True, slots=True)
 class Settings:
@@ -25,6 +41,7 @@ class Settings:
     database_url: str
     db_path: str
     allowed_ids: frozenset[int]
+    admin_ids: frozenset[int]
     timezone: str
     log_level: str
     gemini_api_key: str | None
@@ -134,6 +151,7 @@ def load_settings() -> Settings:
         database_url=database_url,
         db_path=db_path,
         allowed_ids=parse_allowed_ids(os.getenv("ALLOWED_IDS", "")),
+        admin_ids=ADMIN_IDS,
         timezone=timezone,
         log_level=os.getenv("LOG_LEVEL", "INFO").upper(),
         gemini_api_key=gemini_api_key,

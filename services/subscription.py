@@ -5,6 +5,7 @@ from datetime import datetime
 
 from aiogram.types import Message
 
+from config import ADMIN_IDS
 from database import crud
 from database.models import User
 from database.session import db_session
@@ -55,6 +56,20 @@ PREMIUM_PLANS = (
 PLANS_BY_CODE = {plan.code: plan for plan in PREMIUM_PLANS}
 
 
+def is_admin_user(user_or_id: User | int) -> bool:
+    telegram_id = (
+        user_or_id if isinstance(user_or_id, int) else user_or_id.telegram_id
+    )
+    return telegram_id in ADMIN_IDS
+
+
+def creator_status_text() -> str:
+    return (
+        "👑 <b>Статус: Создатель бота</b>\n"
+        "<i>Пожизненный безлимитный доступ ко всем функциям</i>"
+    )
+
+
 def premium_deadline(user: User, now: datetime | None = None) -> datetime | None:
     current = now or utc_now()
     active = [
@@ -65,7 +80,11 @@ def premium_deadline(user: User, now: datetime | None = None) -> datetime | None
     return max(active) if active else None
 
 
-def has_premium_access(user: User, now: datetime | None = None) -> bool:
+def has_premium_access(user: User | int, now: datetime | None = None) -> bool:
+    if is_admin_user(user):
+        return True
+    if isinstance(user, int):
+        return False
     return premium_deadline(user, now) is not None
 
 
@@ -74,6 +93,8 @@ def premium_status_text(
     now: datetime | None = None,
     timezone_name: str | None = None,
 ) -> str:
+    if is_admin_user(user):
+        return creator_status_text()
     current = now or utc_now()
     deadline = premium_deadline(user, current)
     if deadline is None:
@@ -98,10 +119,20 @@ def premium_status_text(
 def premium_storefront_text(
     user: User | None = None,
     timezone_name: str | None = None,
+    telegram_id: int | None = None,
 ) -> str:
-    status = (
-        f"\n{premium_status_text(user, timezone_name=timezone_name)}\n"
-        if user is not None else "\n"
+    identity: User | int | None = user if user is not None else telegram_id
+    is_creator = identity is not None and is_admin_user(identity)
+    if is_creator:
+        status = f"\n{creator_status_text()}\n"
+    elif user is not None:
+        status = f"\n{premium_status_text(user, timezone_name=timezone_name)}\n"
+    else:
+        status = "\n"
+    action = (
+        "Тарифы вам не требуются — все Premium-функции уже открыты навсегда."
+        if is_creator
+        else "Выберите удобный период:"
     )
     return (
         "━━━━━━━━━━━━━━━━━━━━\n"
@@ -113,7 +144,7 @@ def premium_storefront_text(
         "• 📊 Детальные графики снов\n"
         "• 🎯 Точные подсказки окон сна\n"
         f"{status}"
-        "Выберите удобный период:\n"
+        f"{action}\n"
         "━━━━━━━━━━━━━━━━━━━━\n"
         "<i>Цены в евро ориентировочные: стоимость Stars зависит от платформы и региона.</i>\n"
         "Нажимая тариф, вы подтверждаете согласие с /terms. Автопродления нет."
@@ -142,6 +173,8 @@ def parse_invoice_payload(payload: str) -> tuple[PremiumPlan, int] | None:
 
 
 async def require_premium_access(message: Message, telegram_id: int) -> bool:
+    if has_premium_access(telegram_id):
+        return True
     async with db_session() as session:
         user = await crud.get_user(session, telegram_id)
         if user is None:

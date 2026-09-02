@@ -59,6 +59,7 @@ async def main() -> None:
             BotCommand(command="subscribe", description="Premium через Telegram Stars"),
             BotCommand(command="terms", description="Условия Premium"),
             BotCommand(command="paysupport", description="Поддержка по оплате"),
+            BotCommand(command="give_premium", description="Выдать Premium (админ)"),
         ])
     except Exception:
         logging.getLogger(__name__).warning(

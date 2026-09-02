@@ -315,6 +315,25 @@ async def activate_subscription(
         return existing.subscription_end_date, False
 
 
+async def grant_premium(
+    session: AsyncSession,
+    user: User,
+    *,
+    days: int,
+    granted_at: datetime,
+) -> datetime:
+    """Безопасно продлевает Premium вручную, не создавая фиктивный платёж."""
+    if days <= 0:
+        raise ValueError("Количество дней должно быть положительным")
+    base = user.subscription_end_date
+    if base is None or base < granted_at:
+        base = granted_at
+    subscription_end = base + timedelta(days=days)
+    user.subscription_end_date = subscription_end
+    await session.flush()
+    return subscription_end
+
+
 async def seed_monthly_data(
     session: AsyncSession,
     child_id: int,
