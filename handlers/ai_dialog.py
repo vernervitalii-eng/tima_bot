@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -15,6 +16,7 @@ from handlers.states import AIState
 from keyboards.inline import ai_dialog_exit_keyboard
 from keyboards.main import main_keyboard
 from services.ai_analyst import (
+    GEMINI_OPERATION_TIMEOUT_SECONDS,
     ask_sleep_consultant,
     format_consultant_answer,
     get_last_base_routine,
@@ -167,15 +169,18 @@ async def ai_dialog_question(
             if snapshot is not None
             else state_data.get("base_routine") or get_last_base_routine(child_id)
         )
-        answer = await ask_sleep_consultant(
-            settings.gemini_api_key,
-            settings.gemini_model,
-            age_months,
-            timezone_name,
-            logs,
-            question,
-            dialog_history,
-            base_routine,
+        answer = await asyncio.wait_for(
+            ask_sleep_consultant(
+                settings.gemini_api_key,
+                settings.gemini_model,
+                age_months,
+                timezone_name,
+                logs,
+                question,
+                dialog_history,
+                base_routine,
+            ),
+            timeout=GEMINI_OPERATION_TIMEOUT_SECONDS,
         )
         if await state.get_state() != AIState.in_dialog.state:
             try:
@@ -199,6 +204,16 @@ async def ai_dialog_question(
             format_consultant_answer(answer),
             reply_markup=ai_dialog_exit_keyboard(),
         )
+    except TimeoutError:
+        logger.warning("Gemini не ответил за отведённое время в режиме диалога")
+        if await state.get_state() == AIState.in_dialog.state:
+            await state.update_data(ai_busy=False)
+            await progress.edit_text(
+                "<b>Ответ занимает слишком много времени</b>\n\n"
+                "Запрос остановлен, поэтому бот снова готов принимать сообщения. "
+                "Попробуйте повторить вопрос немного позже.",
+                reply_markup=ai_dialog_exit_keyboard(),
+            )
     except Exception:
         logger.exception("Ошибка диалога с Gemini")
         if await state.get_state() == AIState.in_dialog.state:

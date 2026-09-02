@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from datetime import timedelta
 
@@ -12,6 +13,7 @@ from database import crud
 from database.session import db_session
 from keyboards.inline import ai_refresh_keyboard
 from services.ai_analyst import (
+    GEMINI_OPERATION_TIMEOUT_SECONDS,
     analyze_routine,
     build_sleep_history,
     format_analysis_card,
@@ -62,17 +64,27 @@ async def _run_analysis(message: Message, telegram_id: int, settings: Settings) 
         "🧠 Анализирую режим и ищу устойчивые окна сна…"
     )
     try:
-        analysis, days = await analyze_routine(
-            settings.gemini_api_key,
-            settings.gemini_model,
-            age_months,
-            timezone_name,
-            logs,
+        analysis, days = await asyncio.wait_for(
+            analyze_routine(
+                settings.gemini_api_key,
+                settings.gemini_model,
+                age_months,
+                timezone_name,
+                logs,
+            ),
+            timeout=GEMINI_OPERATION_TIMEOUT_SECONDS,
         )
         base_routine = remember_base_routine(child_id, analysis)
         async with db_session() as session:
             await crud.save_ai_routine_snapshot(session, child_id, base_routine, utc_now())
         card = format_analysis_card(analysis, days)
+    except TimeoutError:
+        logger.warning("Gemini не завершил анализ режима за отведённое время")
+        await progress.edit_text(
+            "<b>Анализ занимает слишком много времени</b>\n\n"
+            "Запрос остановлен. Бот продолжает работать — попробуйте снова немного позже."
+        )
+        return
     except Exception:
         logger.exception("Не удалось выполнить Gemini-анализ режима")
         await progress.edit_text(

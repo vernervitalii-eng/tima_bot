@@ -14,6 +14,8 @@ from services.time_utils import to_local, utc_now
 
 
 _BASE_ROUTINE_CACHE: dict[int, str] = {}
+GEMINI_REQUEST_TIMEOUT_SECONDS = 30
+GEMINI_OPERATION_TIMEOUT_SECONDS = 60
 
 
 class ScheduleItem(BaseModel):
@@ -61,6 +63,8 @@ class ConsultantScheduleAnswer(ConsultantAnswer):
 
 def _is_retryable_gemini_error(exc: Exception) -> bool:
     """Распознаёт временные ошибки Gemini, для которых безопасен повтор запроса."""
+    if isinstance(exc, TimeoutError):
+        return True
     raw_code = getattr(exc, "code", None) or getattr(exc, "status_code", None)
     try:
         code = int(raw_code)
@@ -87,10 +91,13 @@ async def _generate_with_fallback(
         for attempt in range(attempts):
             try:
                 async with genai.Client(api_key=api_key).aio as client:
-                    response = await client.models.generate_content(
-                        model=candidate_model,
-                        contents=contents,
-                        config=config,
+                    response = await asyncio.wait_for(
+                        client.models.generate_content(
+                            model=candidate_model,
+                            contents=contents,
+                            config=config,
+                        ),
+                        timeout=GEMINI_REQUEST_TIMEOUT_SECONDS,
                     )
                 if not response.text:
                     raise RuntimeError("Gemini вернул пустой ответ")

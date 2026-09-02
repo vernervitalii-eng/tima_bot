@@ -23,6 +23,7 @@ from services.ai_analyst import (
     format_consultant_answer,
     consultation_requires_schedule,
     trim_dialog_history,
+    _is_retryable_gemini_error,
 )
 from services.day_timeline import build_day_timeline, local_date_bounds_utc
 from services.sleep_insights import build_wake_widget, typical_wake_minutes
@@ -268,6 +269,17 @@ def test_ai_consultant_retries_once_after_invalid_json(monkeypatch):
     assert len(prompts) == 2
     assert prompts[1] != prompts[0]
     assert "Проверьте длительность последнего окна бодрствования." in result
+
+
+def test_gemini_timeout_is_retryable_and_operations_are_bounded():
+    assert _is_retryable_gemini_error(TimeoutError())
+    service_source = Path("services/ai_analyst.py").read_text(encoding="utf-8")
+    dialog_source = Path("handlers/ai_dialog.py").read_text(encoding="utf-8")
+    routine_source = Path("handlers/ai_routine.py").read_text(encoding="utf-8")
+    assert "asyncio.wait_for" in service_source
+    assert "asyncio.wait_for" in dialog_source
+    assert "asyncio.wait_for" in routine_source
+    assert "ai_busy=False" in dialog_source
 
 
 def test_ai_dialog_router_precedes_standard_text_handlers():
