@@ -87,9 +87,8 @@ def apply_job(settings, job: dict, now: int | None = None) -> dict:
     job_hash = hashlib.sha256(json.dumps(job, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
     with closing(_connect(settings)) as db, db:
         db.execute('BEGIN IMMEDIATE')
-        children = db.execute('SELECT id FROM children WHERE invite_code=?', (settings.room_code,)).fetchall()
-        if [r['id'] for r in children] != [settings.child_id]:
-            raise ValueError('Wrong source family')
+        from services.app_sync import verify_family_scope
+        verify_family_scope(db, settings)
         # These separate tables only add receipts/mappings/audit; existing tables stay intact.
         db.execute('CREATE TABLE IF NOT EXISTS app_sync_receipts (job_id TEXT PRIMARY KEY,source_id TEXT NOT NULL,child_id INTEGER NOT NULL,app_id TEXT NOT NULL,revision INTEGER NOT NULL,job_hash TEXT NOT NULL,result_json TEXT NOT NULL,notified INTEGER NOT NULL DEFAULT 0,applied_at INTEGER NOT NULL)')
         db.execute('CREATE TABLE IF NOT EXISTS app_sync_row_links (source_id TEXT NOT NULL,app_id TEXT NOT NULL,child_id INTEGER NOT NULL,bot_id INTEGER NOT NULL,revision INTEGER NOT NULL,payload_json TEXT NOT NULL,PRIMARY KEY(source_id,app_id),UNIQUE(source_id,bot_id))')
@@ -120,7 +119,8 @@ def apply_job(settings, job: dict, now: int | None = None) -> dict:
             if old is None:
                 problem = 'Запись Telegram не найдена; история приложения сохранена.'
             else:
-                actual = {'id': bot_id, 'start': _milliseconds(old['start_time'], bool(local_link)), 'end': _milliseconds(old['end_time'], bool(local_link)), 'kind': old['sleep_type']}
+                precise = bool(local_link) or settings.precise_timestamps
+                actual = {'id': bot_id, 'start': _milliseconds(old['start_time'], precise), 'end': _milliseconds(old['end_time'], precise), 'kind': old['sleep_type']}
                 if actual != expected:
                     problem = 'Время изменено в Telegram; обе версии сохранены.'
         elif expected is not None:

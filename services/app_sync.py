@@ -12,7 +12,7 @@ import sqlite3
 import time
 import urllib.request
 from contextlib import closing
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
@@ -30,6 +30,8 @@ class BridgeSettings:
     public_key: str
     signing_key: bytes
     reverse_enabled: bool = False
+    telegram_user_id: int | None = None
+    precise_timestamps: bool = False
 
     @classmethod
     def from_env(cls) -> BridgeSettings | None:
@@ -55,6 +57,49 @@ class BridgeSettings:
             raise ValueError("Invalid source family")
         return cls(str(path), room, child, source, url, public_key, key, os.getenv('APP_SYNC_REVERSE_ENABLED', '').lower() == 'true')
 
+    @classmethod
+    def extra_from_env(cls, primary: BridgeSettings) -> list[BridgeSettings]:
+        """Explicit extra capabilities, never automatic discovery of other families."""
+        raw = os.getenv('APP_SYNC_EXTRA_SOURCES', '').strip()
+        if not raw:
+            return []
+        if len(raw) > 12000:
+            raise ValueError('Extra source configuration exceeds bound')
+        items = json.loads(raw)
+        if not isinstance(items, list) or len(items) > 8:
+            raise ValueError('Explicit source list required')
+        sources, children, rooms = {primary.source_id}, {primary.child_id}, {primary.room_code}
+        result = []
+        allowed = {'child_id', 'room_code', 'source_id', 'signing_key', 'telegram_user_id', 'reverse_enabled'}
+        for item in items:
+            if not isinstance(item, dict) or set(item) - allowed:
+                raise ValueError('Unsupported extra source settings')
+            child, user = item.get('child_id'), item.get('telegram_user_id')
+            room, source = item.get('room_code'), item.get('source_id')
+            key, reverse = item.get('signing_key'), item.get('reverse_enabled', False)
+            if (type(child) is not int or child <= 0 or type(user) is not int or user <= 0
+                or not isinstance(room, str) or not re.fullmatch(r'[A-Z0-9]{6,12}', room)
+                or not isinstance(source, str) or not re.fullmatch(r'[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}', source)
+                or not isinstance(key, str) or not re.fullmatch(r'[a-f0-9]{64}', key) or type(reverse) is not bool):
+                raise ValueError('Invalid extra source identity')
+            if source in sources or child in children or room in rooms:
+                raise ValueError('Duplicate or primary family in extra sources')
+            sources.add(source); children.add(child); rooms.add(room)
+            result.append(replace(primary, child_id=child, room_code=room, source_id=source,
+                signing_key=bytes.fromhex(key), reverse_enabled=reverse, telegram_user_id=user,
+                precise_timestamps=True))
+        return result
+
+
+def verify_family_scope(db, settings: BridgeSettings) -> None:
+    children = db.execute('SELECT id FROM children WHERE invite_code=?', (settings.room_code,)).fetchall()
+    if [r[0] for r in children] != [settings.child_id]:
+        raise ValueError('Source family does not match configuration')
+    if settings.telegram_user_id is not None:
+        users = db.execute('SELECT child_id FROM users WHERE telegram_id=?', (settings.telegram_user_id,)).fetchall()
+        if [r[0] for r in users] != [settings.child_id]:
+            raise ValueError('Configured Telegram account does not belong to source family')
+
 
 def read_snapshot(settings: BridgeSettings) -> list[dict]:
     path = Path(settings.db_path)
@@ -64,9 +109,7 @@ def read_snapshot(settings: BridgeSettings) -> list[dict]:
     with closing(sqlite3.connect(path.as_uri() + "?mode=ro", uri=True, timeout=3.0)) as db:
         db.execute("PRAGMA query_only=ON")
         db.execute("BEGIN")
-        children = db.execute("SELECT id FROM children WHERE invite_code=?", (settings.room_code,)).fetchall()
-        if children != [(settings.child_id,)]:
-            raise ValueError("Source family does not match configuration")
+        verify_family_scope(db, settings)
         rows = db.execute("SELECT id,start_time,end_time,sleep_type FROM sleep_logs WHERE child_id=? ORDER BY start_time,id", (settings.child_id,)).fetchall()
         precise_ids = set()
         if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_sync_row_links'").fetchone():
@@ -82,7 +125,7 @@ def read_snapshot(settings: BridgeSettings) -> list[dict]:
         # Matches the already imported source's second precision.
         return int(parsed.timestamp()) * 1000
     from services.app_sync_reverse import _milliseconds
-    return [{"id":r[0],"start":_milliseconds(r[1]) if r[0] in precise_ids else milliseconds(r[1]),"end":_milliseconds(r[2]) if r[0] in precise_ids else milliseconds(r[2]),"kind":r[3]} for r in rows]
+    return [{"id":r[0],"start":_milliseconds(r[1]) if settings.precise_timestamps or r[0] in precise_ids else milliseconds(r[1]),"end":_milliseconds(r[2]) if settings.precise_timestamps or r[0] in precise_ids else milliseconds(r[2]),"kind":r[3]} for r in rows]
 
 
 def signed_request(settings: BridgeSettings, sleeps: list[dict], sequence: int) -> dict:
