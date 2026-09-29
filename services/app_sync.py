@@ -1,4 +1,4 @@
-"""Isolated, one-way sleep bridge. Never writes to the bot's SQLite file."""
+"""Family-scoped sleep bridge with opt-in, audited reverse synchronization."""
 from __future__ import annotations
 
 import asyncio
@@ -29,6 +29,7 @@ class BridgeSettings:
     supabase_url: str
     public_key: str
     signing_key: bytes
+    reverse_enabled: bool = False
 
     @classmethod
     def from_env(cls) -> BridgeSettings | None:
@@ -52,7 +53,7 @@ class BridgeSettings:
         room = os.environ["APP_SYNC_ROOM_CODE"]
         if child <= 0 or not re.fullmatch(r"[A-Z0-9]{6,12}", room):
             raise ValueError("Invalid source family")
-        return cls(str(path), room, child, source, url, public_key, key)
+        return cls(str(path), room, child, source, url, public_key, key, os.getenv('APP_SYNC_REVERSE_ENABLED', '').lower() == 'true')
 
 
 def read_snapshot(settings: BridgeSettings) -> list[dict]:
@@ -67,6 +68,9 @@ def read_snapshot(settings: BridgeSettings) -> list[dict]:
         if children != [(settings.child_id,)]:
             raise ValueError("Source family does not match configuration")
         rows = db.execute("SELECT id,start_time,end_time,sleep_type FROM sleep_logs WHERE child_id=? ORDER BY start_time,id", (settings.child_id,)).fetchall()
+        precise_ids = set()
+        if db.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='app_sync_row_links'").fetchone():
+            precise_ids = {r[0] for r in db.execute('SELECT bot_id FROM app_sync_row_links WHERE source_id=? AND child_id=?', (settings.source_id, settings.child_id))}
         if len(rows) > 10000:
             raise ValueError("Source history exceeds configured bound")
     def milliseconds(value: str | None) -> int | None:
@@ -77,7 +81,8 @@ def read_snapshot(settings: BridgeSettings) -> list[dict]:
             parsed = parsed.replace(tzinfo=timezone.utc)
         # Matches the already imported source's second precision.
         return int(parsed.timestamp()) * 1000
-    return [{"id":r[0],"start":milliseconds(r[1]),"end":milliseconds(r[2]),"kind":r[3]} for r in rows]
+    from services.app_sync_reverse import _milliseconds
+    return [{"id":r[0],"start":_milliseconds(r[1]) if r[0] in precise_ids else milliseconds(r[1]),"end":_milliseconds(r[2]) if r[0] in precise_ids else milliseconds(r[2]),"kind":r[3]} for r in rows]
 
 
 def signed_request(settings: BridgeSettings, sleeps: list[dict], sequence: int) -> dict:
@@ -98,13 +103,28 @@ def send_snapshot(settings: BridgeSettings, sleeps: list[dict], sequence: int) -
     return result
 
 
-async def sync_loop(settings: BridgeSettings) -> None:
+async def sync_loop(settings: BridgeSettings, bot=None) -> None:
     last_hash = ""
     last_sent = 0.0
     failures = 0
     last_conflicts = None
     while True:
         try:
+            if settings.reverse_enabled:
+                from services.app_sync_reverse import pull_and_apply, pending_notifications
+                from database.session import db_lock
+                batch_full = await pull_and_apply(settings)
+                async with db_lock:
+                    notify = await asyncio.to_thread(pending_notifications, settings)
+                if notify and bot is not None:
+                    from services.live_status import resync_child_runtime
+                    await resync_child_runtime(bot, settings.child_id)
+                    async with db_lock:
+                        await asyncio.to_thread(pending_notifications, settings, True)
+                if batch_full:
+                    # Drain the ordered outbox before echoing a potentially older snapshot.
+                    await asyncio.sleep(1)
+                    continue
             sleeps = await asyncio.to_thread(read_snapshot, settings)
             fingerprint = hashlib.sha256(json.dumps(sleeps, sort_keys=True).encode()).hexdigest()
             if fingerprint != last_hash or time.monotonic() - last_sent >= 60:

@@ -1,26 +1,21 @@
-"""Optional launcher. Existing bot entrypoint/tracking code remains unchanged."""
+"""Optional bridge launcher using the existing bot and tracking handlers."""
 import asyncio
 import logging
-from contextlib import suppress
 
 
 async def launch() -> None:
     from main import main
     from services.app_sync import BridgeSettings, sync_loop
-    task = None
-    try:
-        settings = BridgeSettings.from_env()
-        if settings:
-            task = asyncio.create_task(sync_loop(settings), name="app-sleep-sync")
-    except Exception as error:
-        logging.getLogger(__name__).warning("App sync disabled (%s); original bot starts normally", type(error).__name__)
-    try:
-        await main()
-    finally:
-        if task:
-            task.cancel()
-            with suppress(asyncio.CancelledError):
-                await task
+    async def start_sync(bot):
+        try:
+            settings = BridgeSettings.from_env()
+            if settings:
+                return asyncio.create_task(sync_loop(settings, bot), name="app-sleep-sync")
+        except Exception as error:
+            logging.getLogger(__name__).warning("App sync disabled (%s); original bot starts normally", type(error).__name__)
+        return None
+    # SQLite, the existing Bot instance and reminders must be ready before writes.
+    await main(background_factory=start_sync)
 
 
 if __name__ == "__main__":

@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+from contextlib import suppress
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -17,7 +18,7 @@ from handlers import register_handlers
 from services.scheduler import restore_jobs, scheduler
 
 
-async def main() -> None:
+async def main(background_factory=None) -> None:
     settings = load_settings()
     logging.basicConfig(
         level=getattr(logging, settings.log_level, logging.INFO),
@@ -78,7 +79,10 @@ async def main() -> None:
 
     scheduler.start()
     await restore_jobs(bot)
+    background = None
     try:
+        if background_factory is not None:
+            background = await background_factory(bot)
         await bot.delete_webhook(drop_pending_updates=True)
         await dispatcher.start_polling(
             bot,
@@ -86,6 +90,10 @@ async def main() -> None:
             drop_pending_updates=True,
         )
     finally:
+        if background is not None:
+            background.cancel()
+            with suppress(asyncio.CancelledError):
+                await background
         scheduler.shutdown(wait=False)
         await bot.session.close()
         await close_db()
