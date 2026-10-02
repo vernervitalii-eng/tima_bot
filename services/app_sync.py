@@ -10,6 +10,7 @@ import os
 import re
 import sqlite3
 import time
+import urllib.error
 import urllib.request
 from contextlib import closing
 from dataclasses import dataclass, replace
@@ -188,6 +189,16 @@ async def sync_loop(settings: BridgeSettings, bot=None) -> None:
             failures += 1
             # Never log bodies, secrets, SQL, URLs with credentials or child history.
             code = getattr(error, 'code', None)
-            logger.warning("App sync temporarily unavailable (%s%s, stage=%s, child=%s); bot continues normally",
-                           type(error).__name__, f' {code}' if isinstance(code, int) else '', stage, settings.child_id)
+            reason = 'unknown'
+            if isinstance(error, urllib.error.HTTPError):
+                try:
+                    response = json.loads(error.read(2048))
+                    if response.get('message') in ('Reverse bridge rejected', 'Invalid reverse request'):
+                        reason = response['message']
+                    elif re.fullmatch(r'[A-Z0-9]{5}', str(response.get('code', ''))):
+                        reason = 'database ' + response['code']
+                except (OSError, ValueError, TypeError):
+                    pass
+            logger.warning("App sync temporarily unavailable (%s%s, stage=%s, child=%s, reason=%s); bot continues normally",
+                           type(error).__name__, f' {code}' if isinstance(code, int) else '', stage, settings.child_id, reason)
         await asyncio.sleep(min(60, 10 * 2 ** min(failures, 3)))
