@@ -308,7 +308,7 @@ async def natural_time(message: Message) -> None:
             return
         parsed = parse_relative_time(message.text, user.child.timezone)
     if not parsed:
-        await message.answer("Не понял время. Примеры: «уснул в 14:15», «проснулся 20 минут назад».")
+        await message.answer("Не понял время. Примеры: «уснул в 6 вечера», «уснул в 14:15», «проснулся 20 минут назад». Число «6» без уточнения неоднозначно.")
         return
     if message.text.lower().startswith(("проснулся", "проснулась")):
         await do_wake(message, parsed)

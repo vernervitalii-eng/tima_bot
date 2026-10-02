@@ -12,10 +12,14 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from typing import Literal
 
+from services.time_utils import parse_clock_phrase
+
 
 EventKind = Literal["sleep_start", "wake"]
 
-_TIME_RE = re.compile(r"(?<!\d)(?P<hour>\d{1,2})[:.](?P<minute>\d{2})(?!\d)")
+_DAYPART = r"вечером|вечера|утром|утра|ночью|ночи|днём|днем|дня"
+_TIME_TOKEN = rf"(?:\d{{1,2}}[:.]\d{{2}}(?:\s*(?:{_DAYPART}))?|\d{{1,2}}\s+(?:{_DAYPART})|(?:1[3-9]|2[0-3]))"
+_TIME_RE = re.compile(rf"(?<!\d){_TIME_TOKEN}(?!\d)", re.IGNORECASE)
 _DATE_RE = re.compile(r"(?<!\d)(?P<day>\d{1,2})[./](?P<month>\d{1,2})(?:[./](?P<year>\d{2,4}))?(?!\d)")
 _RANGE_RE = re.compile(
     r"(?P<start>\d{1,2}[:.]\d{2})\s*[–—-]\s*(?P<end>\d{1,2}[:.]\d{2})"
@@ -23,11 +27,11 @@ _RANGE_RE = re.compile(
 _SLEEP_START_WORDS = r"уснул(?:а|и)?|заснул(?:а|и)?|усыпил(?:а|и)?|уложил(?:а|и)?"
 _WAKE_WORDS = r"проснулся|проснулась|проснулись|встал(?:а|и)?|поднялся|поднялась"
 _POINT_TIME_FIRST_RE = re.compile(
-    rf"(?P<time>\d{{1,2}}[:.]\d{{2}})\s*(?P<kind>{_SLEEP_START_WORDS}|{_WAKE_WORDS})",
+    rf"(?P<time>{_TIME_TOKEN})\s*(?P<kind>{_SLEEP_START_WORDS}|{_WAKE_WORDS})",
     re.IGNORECASE,
 )
 _POINT_WORD_FIRST_RE = re.compile(
-    rf"(?P<kind>{_SLEEP_START_WORDS}|{_WAKE_WORDS})\s*(?:в\s*)?(?P<time>\d{{1,2}}[:.]\d{{2}})",
+    rf"(?P<kind>{_SLEEP_START_WORDS}|{_WAKE_WORDS})\s*(?:в\s*)?(?P<time>{_TIME_TOKEN})",
     re.IGNORECASE,
 )
 @dataclass(frozen=True, slots=True)
@@ -64,8 +68,9 @@ def _parse_date_token(match: re.Match[str], reference_date: date) -> date:
 
 
 def _parse_clock(raw: str) -> time:
-    hour, minute = re.split(r"[:.]", raw)
-    value = time(int(hour), int(minute))
+    value = parse_clock_phrase(raw)
+    if value is None:
+        raise ValueError(f"Некорректное время: {raw}")
     return value
 
 
@@ -122,11 +127,12 @@ def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
             continue
 
         if range_match and re.search(r"\b(спал|спала|сон|спит)\b", lower):
-            start = _at(line_date, range_match.group("start"))
-            end = _at(line_date, range_match.group("end"), start)
-            if end <= start:
-                end += timedelta(days=1)
-            ranges.append((start, end, line))
+            try:
+                start = _at(line_date, range_match.group("start"))
+                end = _at(line_date, range_match.group("end"), start)
+                ranges.append((start, end, line))
+            except ValueError:
+                warnings.append(f"Некорректное время в строке: {line[:80]}")
 
         # Оба порядка слов поддерживаются: «07:00 проснулся» и «уснул в 21:00».
         matches: list[tuple[int, EventKind, str]] = []
@@ -142,7 +148,11 @@ def parse_text(text: str, reference_date: date | None = None) -> ParseResult:
         matches.sort(key=lambda item: item[0])
         previous: datetime | None = None
         for _, kind, clock in matches:
-            event_at = _at(line_date, clock, previous)
+            try:
+                event_at = _at(line_date, clock, previous)
+            except ValueError:
+                warnings.append(f"Некорректное время в строке: {line[:80]}")
+                continue
             point_events.append((kind, event_at, line))
             previous = event_at
 

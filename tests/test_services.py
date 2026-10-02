@@ -1,7 +1,7 @@
 from datetime import date, datetime
 
 from services.norms import norm_for_age
-from services.time_utils import age_parts, is_quiet_hours, parse_relative_time
+from services.time_utils import age_parts, is_quiet_hours, parse_clock_phrase, parse_relative_time
 from keyboards.inline import family_keyboard, settings_keyboard, start_choice_keyboard
 from config import DB_DIR, DEFAULT_DB_PATH, PROJECT_DIR, normalize_database_url
 from database.models import AIRoutineSnapshot, SleepLog
@@ -26,6 +26,17 @@ def test_parser_minutes_ago():
 def test_parser_clock_rolls_to_previous_day():
     now = datetime(2025, 3, 20, 1, 0)
     assert parse_relative_time("уснул в 23:30", "UTC", now) == datetime(2025, 3, 19, 23, 30)
+
+
+def test_colloquial_sleep_times_are_unambiguous():
+    now = datetime(2025, 3, 20, 20, 0)
+    assert parse_relative_time("уснул в 6 вечера", "UTC", now) == datetime(2025, 3, 20, 18, 0)
+    assert parse_relative_time("уснул в 6:30 вечера", "UTC", now) == datetime(2025, 3, 20, 18, 30)
+    assert parse_relative_time("уснул в 18", "UTC", now) == datetime(2025, 3, 20, 18, 0)
+    assert parse_relative_time("проснулся в 6 утра", "UTC", datetime(2025, 3, 20, 9)) == datetime(2025, 3, 20, 6)
+    assert parse_relative_time("вчера уснул в 6 вечера", "UTC", now) == datetime(2025, 3, 19, 18)
+    assert parse_relative_time("уснул в 6", "UTC", now) is None
+    assert parse_clock_phrase("12 ночи").hour == 0
 
 
 def test_quiet_hours():

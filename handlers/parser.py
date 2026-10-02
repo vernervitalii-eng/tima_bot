@@ -35,7 +35,7 @@ async def parse_natural_message(message: Message) -> None:
     if not parsed.sleeps:
         await message.answer(
             "Не нашёл событие сна. Примеры: «04.08 10:15-11:30 спал», "
-            "«уснул в 21:00», «проснулся в 07:30»."
+            "«уснул в 6 вечера», «проснулся в 07:30»."
         )
         return
 

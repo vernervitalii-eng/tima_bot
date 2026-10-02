@@ -6,6 +6,43 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 
+_DAYPART = r"вечером|вечера|утром|утра|ночью|ночи|днём|днем|дня"
+_CLOCK_PHRASE_RE = re.compile(
+    rf"(?<!\d)(?:в\s+)?(?P<hour>\d{{1,2}})(?:[:.](?P<minute>[0-5]\d))?"
+    rf"\s*(?P<daypart>{_DAYPART})?\b",
+    re.IGNORECASE,
+)
+
+
+def parse_clock_phrase(raw: str) -> time | None:
+    """Разбирает 18:00, 6 вечера и 6:30 утра; голое «6» неоднозначно."""
+    match = _CLOCK_PHRASE_RE.fullmatch(raw.strip())
+    if not match:
+        return None
+    hour = int(match.group("hour"))
+    minute_raw = match.group("minute")
+    daypart = (match.group("daypart") or "").lower().replace("ё", "е")
+    if not daypart and minute_raw is None and hour < 13:
+        return None
+    if daypart:
+        if hour > 23 or hour == 0:
+            return None
+        if daypart.startswith("утр"):
+            if hour == 12:
+                return None
+        elif daypart.startswith("дн") or daypart.startswith("вечер"):
+            if hour <= 12:
+                if hour == 12 and daypart.startswith("вечер"):
+                    return None
+                hour = hour % 12 + 12
+        elif daypart.startswith("ноч"):
+            hour = 0 if hour == 12 else hour + 12 if 7 <= hour <= 11 else hour
+    try:
+        return time(hour, int(minute_raw or 0))
+    except ValueError:
+        return None
+
+
 def utc_now() -> datetime:
     # SQLite хранит naive UTC; преобразование в локальное время делается на границе UI.
     return datetime.now(timezone.utc).replace(tzinfo=None)
@@ -81,7 +118,7 @@ def age_parts(birth: date, today: date | None = None) -> tuple[int, int]:
 
 
 def parse_relative_time(text: str, timezone_name: str, now: datetime | None = None) -> datetime | None:
-    """Понимает `уснул в 14:15` и `проснулся 20 минут назад`."""
+    """Понимает точное, разговорное и относительное время без догадок о голом «6»."""
     now_utc = now or utc_now()
     lower = text.lower().replace("ё", "е")
     ago = re.search(r"(\d{1,3})\s*(минут(?:у|ы)?|мин)\s*назад", lower)
@@ -90,14 +127,25 @@ def parse_relative_time(text: str, timezone_name: str, now: datetime | None = No
     ago_hours = re.search(r"(\d{1,2})\s*(?:час(?:а|ов)?|ч)\s*назад", lower)
     if ago_hours:
         return now_utc - timedelta(hours=int(ago_hours.group(1)))
-    clock = re.search(r"(?:\bв\s*)?(\d{1,2})[:.]([0-5]\d)\b", lower)
-    if clock:
-        hour, minute = int(clock.group(1)), int(clock.group(2))
-        if hour > 23:
-            return None
+    for clock_match in _CLOCK_PHRASE_RE.finditer(lower):
+        clock_value = parse_clock_phrase(clock_match.group(0))
+        if clock_value is None:
+            continue
         local_now = to_local(now_utc, timezone_name)
-        candidate = local_now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        selected_date = local_now.date()
+        explicit_date = False
+        if re.search(r"\bпозавчера\b", lower):
+            selected_date -= timedelta(days=2)
+            explicit_date = True
+        elif re.search(r"\bвчера\b", lower):
+            selected_date -= timedelta(days=1)
+            explicit_date = True
+        elif re.search(r"\bсегодня\b", lower):
+            explicit_date = True
+        candidate = datetime.combine(selected_date, clock_value, ZoneInfo(timezone_name))
         if candidate > local_now + timedelta(minutes=2):
+            if explicit_date:
+                return None
             candidate -= timedelta(days=1)
         return candidate.astimezone(timezone.utc).replace(tzinfo=None)
     return None

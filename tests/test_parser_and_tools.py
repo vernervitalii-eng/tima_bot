@@ -1,5 +1,5 @@
 import asyncio
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 from database import crud
@@ -16,6 +16,16 @@ def test_parser_supports_only_sleep_ranges_and_dates():
     assert any(item.duration_minutes == 75 for item in result.sleeps)
     assert any(item.start.date() == date(2026, 8, 30) and item.end.date() == date(2026, 8, 31) for item in result.sleeps if item.end)
     assert len(result.sleeps) == 2
+
+
+def test_parser_supports_spoken_dayparts_across_midnight():
+    result = parse_text(
+        "вчера уснул в 6 вечера проснулся в 7 утра",
+        date(2026, 10, 2),
+    )
+    assert len(result.sleeps) == 1
+    assert result.sleeps[0].start == datetime(2026, 10, 1, 18)
+    assert result.sleeps[0].end == datetime(2026, 10, 2, 7)
 
 
 def test_august_seed_source_is_parseable():
