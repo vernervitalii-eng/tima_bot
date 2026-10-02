@@ -186,5 +186,10 @@ async def pull_and_apply(settings) -> bool:
         async with db_lock:
             result = await asyncio.to_thread(apply_job, settings, job)
         # The receipt committed before ACK. A lost reply only retries the same job.
-        await asyncio.to_thread(reverse_rpc, settings, 'ack', job_id=job['id'], result=result)
+        try:
+            await asyncio.to_thread(reverse_rpc, settings, 'ack', job_id=job['id'], result=result)
+        except urllib.error.HTTPError:
+            logger.warning('Reverse ACK pending (sequence=%s, bot_id=%s, status=%s)',
+                           job.get('sequence'), result.get('bot_id'), result.get('status'))
+            raise
     return len(response['jobs']) == 100
