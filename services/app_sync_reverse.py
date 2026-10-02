@@ -4,13 +4,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import logging
+import re
 import sqlite3
 import time
+import urllib.error
 import urllib.request
 from contextlib import closing
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from uuid import UUID
+
+logger = logging.getLogger(__name__)
 
 
 def _uuid(value) -> str:
@@ -43,8 +48,20 @@ def reverse_rpc(settings, action: str, **fields) -> dict:
     signature = hmac.new(settings.signing_key, body.encode(), hashlib.sha256).hexdigest()
     data = json.dumps({'p_source': settings.source_id, 'p_body': body, 'p_signature': signature}).encode()
     request = urllib.request.Request(settings.supabase_url + '/rest/v1/rpc/br_' + ('pull_bot' if action == 'pull' else 'ack_bot'), data=data, method='POST', headers={'apikey': settings.public_key, 'Content-Type': 'application/json'})
-    with urllib.request.urlopen(request, timeout=8) as response:
-        raw = response.read(1_000_001)
+    try:
+        with urllib.request.urlopen(request, timeout=8) as response:
+            raw = response.read(1_000_001)
+    except urllib.error.HTTPError as error:
+        category = 'unclassified'
+        try:
+            reply = json.loads(error.read(2048))
+            message = reply.get('message')
+            if isinstance(message, str) and re.fullmatch(r'[A-Za-z /:._-]{1,100}', message):
+                category = message
+        except (OSError, ValueError, TypeError):
+            pass
+        logger.warning('Reverse sync rejected (action=%s, HTTP=%s, reason=%s)', action, error.code, category)
+        raise
     if len(raw) > 1_000_000:
         raise ValueError('Response exceeds bound')
     result = json.loads(raw)
