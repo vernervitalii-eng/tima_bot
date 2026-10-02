@@ -152,10 +152,12 @@ async def sync_loop(settings: BridgeSettings, bot=None) -> None:
     failures = 0
     last_conflicts = None
     while True:
+        stage = 'snapshot'
         try:
             if settings.reverse_enabled:
                 from services.app_sync_reverse import pull_and_apply, pending_notifications
                 from database.session import db_lock
+                stage = 'pull'
                 batch_full = await pull_and_apply(settings)
                 async with db_lock:
                     notify = await asyncio.to_thread(pending_notifications, settings)
@@ -171,6 +173,7 @@ async def sync_loop(settings: BridgeSettings, bot=None) -> None:
             sleeps = await asyncio.to_thread(read_snapshot, settings)
             fingerprint = hashlib.sha256(json.dumps(sleeps, sort_keys=True).encode()).hexdigest()
             if fingerprint != last_hash or time.monotonic() - last_sent >= 60:
+                stage = 'ingest'
                 result = await asyncio.to_thread(send_snapshot, settings, sleeps, time.time_ns() // 1000000)
                 if not result.get("stale"):
                     last_hash, last_sent = fingerprint, time.monotonic()
@@ -184,5 +187,7 @@ async def sync_loop(settings: BridgeSettings, bot=None) -> None:
         except Exception as error:
             failures += 1
             # Never log bodies, secrets, SQL, URLs with credentials or child history.
-            logger.warning("App sync temporarily unavailable (%s); bot continues normally", type(error).__name__)
+            code = getattr(error, 'code', None)
+            logger.warning("App sync temporarily unavailable (%s%s, stage=%s, child=%s); bot continues normally",
+                           type(error).__name__, f' {code}' if isinstance(code, int) else '', stage, settings.child_id)
         await asyncio.sleep(min(60, 10 * 2 ** min(failures, 3)))
