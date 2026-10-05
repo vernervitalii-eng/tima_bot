@@ -70,7 +70,10 @@ def reverse_rpc(settings, action: str, **fields) -> dict:
         if not isinstance(text, str) or not isinstance(mac, str) or not hmac.compare_digest(hmac.new(settings.signing_key, text.encode(), hashlib.sha256).hexdigest(), mac):
             raise ValueError('Unverified reverse response')
         result = json.loads(text)
-        if result.get('version') != 1 or result.get('child_id') != settings.child_id or result.get('source_id') != settings.source_id or not isinstance(result.get('jobs'), list) or len(result['jobs']) > 100:
+        reserved = result.get('reserved_max_bot_id', 0)
+        if (result.get('version') != 1 or result.get('child_id') != settings.child_id
+            or result.get('source_id') != settings.source_id or not isinstance(result.get('jobs'), list)
+            or len(result['jobs']) > 100 or type(reserved) is not int or reserved < 0):
             raise ValueError('Wrong reverse scope')
     elif not result.get('ok'):
         raise ValueError('Acknowledgement failed')
@@ -88,10 +91,11 @@ def _connect(settings):
     return db
 
 
-def apply_job(settings, job: dict, now: int | None = None) -> dict:
+def apply_job(settings, job: dict, now: int | None = None, reserved_max_bot_id: int = 0) -> dict:
     """Atomically persist both a sleep and its receipt. Retries cannot duplicate it."""
     job_id, app_id = _uuid(job['id']), _uuid(job['app_id'])
     revision = _integer(job['revision'])
+    _integer(reserved_max_bot_id, 0)
     payload = job['payload']
     if payload.get('app_id') != app_id or payload.get('revision') != revision or type(payload.get('deleted')) is not bool:
         raise ValueError('Wrong job identity')
@@ -153,7 +157,12 @@ def apply_job(settings, job: dict, now: int | None = None) -> dict:
             if owner is None:
                 raise ValueError('Family author is missing')
             if old is None:
-                cursor = db.execute('INSERT INTO sleep_logs(child_id,start_time,end_time,sleep_type,created_by_user_id,ended_by_user_id) VALUES(?,?,?,?,?,?)', (settings.child_id, _datetime(start), _datetime(end), kind, owner['id'], owner['id'] if end is not None else None))
+                # SQLite may reuse its highest deleted row ID. The signed pull
+                # response reserves every ID already linked in Supabase, even
+                # if that original bot row no longer exists locally.
+                local_max = db.execute('SELECT coalesce(max(id),0) FROM sleep_logs').fetchone()[0]
+                next_id = max(local_max, reserved_max_bot_id) + 1
+                cursor = db.execute('INSERT INTO sleep_logs(id,child_id,start_time,end_time,sleep_type,created_by_user_id,ended_by_user_id) VALUES(?,?,?,?,?,?,?)', (next_id, settings.child_id, _datetime(start), _datetime(end), kind, owner['id'], owner['id'] if end is not None else None))
                 bot_id = cursor.lastrowid
             else:
                 db.execute('UPDATE sleep_logs SET start_time=?,end_time=?,sleep_type=?,ended_by_user_id=? WHERE id=? AND child_id=?', (_datetime(start), _datetime(end), kind, owner['id'] if end is not None else None, bot_id, settings.child_id))
@@ -184,7 +193,7 @@ async def pull_and_apply(settings) -> bool:
     response = await asyncio.to_thread(reverse_rpc, settings, 'pull')
     for job in response['jobs']:
         async with db_lock:
-            result = await asyncio.to_thread(apply_job, settings, job)
+            result = await asyncio.to_thread(apply_job, settings, job, reserved_max_bot_id=response.get('reserved_max_bot_id', 0))
         # The receipt committed before ACK. A lost reply only retries the same job.
         try:
             await asyncio.to_thread(reverse_rpc, settings, 'ack', job_id=job['id'], result=result)
